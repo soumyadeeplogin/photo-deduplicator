@@ -53,8 +53,6 @@ Each pass only sees photos not already flagged by a prior pass — no file appea
 
 ## Architecture
 
-The project is split into focused modules:
-
 | File | Responsibility |
 |---|---|
 | `app.py` | Entry point, CLI argument parsing, mode dispatch |
@@ -65,110 +63,200 @@ The project is split into focused modules:
 | `duplicate_engine.py` | Five detection passes + BK-tree |
 | `thumbnail.py` | Cached JPEG thumbnails (files, not base64) |
 | `mover.py` | Two-phase approval workflow + full undo |
-| `review_server.py` | FastAPI routes, SSE scan progress |
+| `review_server.py` | FastAPI routes, folder picker, SSE scan progress |
 | `templates/` | Jinja2 HTML templates |
 | `static/` | CSS (dark/light mode) + vanilla JS (no CDN) |
-
-### Database as cache
-
-All analysis results — MD5, pHash, sharpness, brightness, EXIF, thumbnails, review decisions, move history — live in `review.db` (SQLite) next to your album folder. A second scan only re-analyses files whose size or modification time changed. On a 5,000-photo album, a second scan typically completes in seconds.
-
-### BK-tree near-duplicate detection
-
-The near-duplicates pass uses a Burkhard-Keller tree over pHash values, reducing the search from O(n²) to O(n log n). For 10,000 photos with an 8-bit Hamming threshold this is the difference between ~10 minutes and ~5 seconds.
-
-### Parallel analysis
-
-MD5, pHash, sharpness, brightness, and thumbnail generation all run in a `ProcessPoolExecutor` using all available CPU cores (auto-detected, configurable). Worker functions are at module level so they pickle cleanly.
 
 ---
 
 ## Requirements
 
 - Python 3.9 or later
-- macOS or Windows
+- Works on macOS, Windows, and Linux
+- No database installation needed — SQLite is built into Python
 
-### Install
+---
+
+## Setup (First Time)
+
+### Step 1 — Get the code
+
+```bash
+git clone https://github.com/soumyadeeplogin/photo-deduplicator.git
+cd photo-deduplicator
+```
+
+Or download the ZIP from GitHub and extract it.
+
+---
+
+### Step 2 — Create a virtual environment
+
+A virtual environment keeps the app's dependencies isolated from the rest of your Python installation.
+
+#### macOS / Linux
+
+```bash
+python3 -m venv .venv
+```
+
+#### Windows (Command Prompt)
+
+```cmd
+python -m venv .venv
+```
+
+#### Windows (PowerShell)
+
+```powershell
+python -m venv .venv
+```
+
+---
+
+### Step 3 — Activate the virtual environment
+
+You must activate the venv every time you open a new terminal before running the app.
+
+#### macOS / Linux
+
+```bash
+source .venv/bin/activate
+```
+
+Your prompt changes to show `(.venv)` — that means it's active.
+
+#### Windows (Command Prompt)
+
+```cmd
+.venv\Scripts\activate.bat
+```
+
+#### Windows (PowerShell)
+
+```powershell
+.venv\Scripts\Activate.ps1
+```
+
+> **PowerShell note:** If you see an error about execution policy, run this once:
+> ```powershell
+> Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+> ```
+> Then try activating again.
+
+---
+
+### Step 4 — Install dependencies
+
+With the venv active:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-| Package | Purpose |
-|---|---|
-| `Pillow` | Image decoding, thumbnail generation |
-| `imagehash` | Perceptual hash (pHash) computation |
-| `opencv-python` | Laplacian sharpness + brightness measurement |
-| `exifread` | EXIF metadata (timestamps, camera, GPS) |
-| `fastapi` | Web server framework |
-| `uvicorn` | ASGI server |
-| `jinja2` | HTML template rendering |
-| `pydantic` | Request/response validation |
+If pip tries a corporate proxy and fails, force it to use PyPI directly:
+
+```bash
+pip install -r requirements.txt --index-url https://pypi.org/simple/
+```
 
 ---
 
-## Quickstart
-
-### Step 1 — Download your album from Google Photos
-
-1. Open [Google Photos](https://photos.google.com)
-2. Select an album (or all photos)
-3. Click the three-dot menu → **Download**
-4. Extract the zip to a local folder, e.g. `~/Downloads/MyAlbum`
-
-### Step 2 — Launch the web app
+### Step 5 — Run the app
 
 ```bash
-python app.py --folder ~/Downloads/MyAlbum --review
+python app.py
 ```
 
-This will:
-1. Scan and analyse all photos (parallel, cached after first run)
-2. Run all five detection passes
-3. Start `http://localhost:8080` and open it in your browser automatically
+This opens `http://localhost:8080` in your browser automatically, showing the **folder picker page**.
 
-### Step 3 — Review groups in the browser
+---
 
-The web UI shows every detected group with:
-- Thumbnails of all photos
-- **KEEP** highlighted in green, **TRASH** in red
-- Sharpness score, file size, resolution, EXIF data, GPS
-- Confidence score (0–100%) coloured green / amber / red
-- Reason the group was flagged
+### Step 6 — Pick your photo folder in the browser
 
-### Step 4 — Approve what you agree with
+On the setup page you can:
+- **Paste the path** directly into the text box
+- **Click Browse** to navigate your filesystem folder by folder
+- **Click a recent folder** if you've used the app before
 
-Click **Approve Delete** on each group you agree with. Files stay on disk — only the database status changes. Use **Change Keeper** to pick a different photo to keep if the auto-selection is wrong. Use **Skip** to leave a group for later.
+Once you confirm, the scan starts automatically and a progress bar shows the status. When it finishes you land on the dashboard.
 
-### Step 5 — Process approved groups
+**Path examples:**
 
-Click **Process Approved** in the sidebar (or `POST /process`). All approved photos move to `_permanent_delete/` next to your album folder. Still reversible — use Undo to bring them back.
+| OS | Example path |
+|---|---|
+| Windows | `C:\Users\YourName\Pictures\Goa2023` |
+| macOS | `/Users/yourname/Downloads/Goa2023` |
+| Linux | `/home/yourname/Downloads/Goa2023` |
 
-### Step 6 — Permanently delete
+---
 
-Open `_permanent_delete/`, review the files manually, then click **Delete Permanently** in the web UI. This is the only step that actually frees disk space.
+### How to deactivate the virtual environment
 
-### Step 7 — Remove from Google Photos
+When you're done and want to go back to normal:
 
-Once you're satisfied:
-1. In Google Photos, select the corresponding photos
-2. Move them to the Google Photos Trash
-3. Empty the Trash to reclaim storage quota
+```bash
+deactivate
+```
+
+This works the same on macOS, Windows, and Linux.
+
+---
+
+## Quickstart (Returning Users)
+
+```bash
+cd photo-deduplicator
+
+# Activate venv (do this every time you open a new terminal)
+source .venv/bin/activate          # macOS / Linux
+.venv\Scripts\activate.bat         # Windows CMD
+.venv\Scripts\Activate.ps1         # Windows PowerShell
+
+# Run
+python app.py
+```
+
+Then go to `http://localhost:8080` and pick your folder.
+
+---
+
+## Download Your Album from Google Photos
+
+1. Open [Google Photos](https://photos.google.com)
+2. Select an album (or all photos using the Select button)
+3. Click the three-dot menu → **Download**
+4. Extract the downloaded zip to a folder on your computer
+5. Point the app at that folder
+
+---
+
+## Workflow (step by step)
+
+| Step | What you do | What happens |
+|---|---|---|
+| 1 | Run `python app.py` | Browser opens at localhost:8080 |
+| 2 | Browse to your photo folder, click Start | Photos scanned, groups detected |
+| 3 | Go to **Review Groups** | See every group with thumbnails + reasons |
+| 4 | Click **Approve Delete** on groups you agree with | DB status changes, files untouched |
+| 5 | Click **Process Approved** in sidebar | Files move to `_permanent_delete/` |
+| 6 | Review `_permanent_delete/` manually | Open folder in Explorer/Finder |
+| 7 | Click **Delete Permanently** in UI | Files removed from disk |
+| 8 | In Google Photos, select same photos | Move to Trash, empty Trash |
 
 ---
 
 ## Project Layout (at runtime)
 
 ```
-~/Downloads/
+your-photos-parent-folder/
 ├── MyAlbum/                   ← your photos (untouched until Step 5)
 │   ├── IMG_3201.jpg
 │   └── ...
-├── review.db                  ← SQLite database (photos, groups, history)
+├── review.db                  ← SQLite database (auto-created, no install needed)
 ├── _permanent_delete/         ← approved files staged here (still recoverable)
 ├── cache/
-│   └── thumbnails/            ← cached JPEG thumbnails (never base64 in HTML)
-├── logs/
+│   └── thumbnails/            ← cached JPEG thumbnails
 ├── dedup_report.csv           ← generated by --report mode
 └── dedup_report.json
 ```
@@ -177,21 +265,26 @@ Once you're satisfied:
 
 ## All CLI Options
 
+`--folder` is now optional — omit it to use the in-browser folder picker.
+
 ```
-python app.py --folder PATH [mode] [options]
+python app.py [--folder PATH] [mode] [options]
+
+folder:
+  --folder PATH     Pre-select a folder (optional — pick in browser if omitted)
 
 modes (mutually exclusive):
-  --review          Scan if needed, then open web UI (default)
-  --scan            Scan only, no web server
-  --execute         Legacy CLI: scan + move files immediately
-  --report          Generate CSV + JSON reports, no web server
+  --review          Scan if needed, launch web UI (default)
+  --scan            Scan only, no web server (requires --folder)
+  --execute         Legacy CLI: scan + move files (requires --folder)
+  --report          Generate CSV/JSON reports, no web server (requires --folder)
 
 scan options:
   --passes LIST     Comma-separated passes: exact,burst,blur,screenshot,similar
                     Default: all five
 
 burst detection:
-  --burst-window SEC    Max seconds between frames to consider a burst (default 3.0)
+  --burst-window SEC    Max seconds between frames for a burst (default 3.0)
   --phash-threshold N   Hamming distance ≤ N = visually identical (default 10)
 
 quality cull:
@@ -217,11 +310,16 @@ output:
 
 ## Web UI Features
 
-### Dashboard
+### Folder Picker (`/setup`)
+- Type or paste any folder path
+- Browse filesystem folder by folder
+- Recent folders remembered across sessions (stored in browser localStorage)
+- Real-time scan progress bar
+
+### Dashboard (`/`)
 - Total photos, album size, potential space savings
 - Groups by category with counts
-- Workflow guide
-- Keyboard shortcut reference
+- Workflow guide and keyboard shortcut reference
 
 ### Review List (`/review`)
 - Filter by category, status, search filename/folder
@@ -231,9 +329,9 @@ output:
 
 ### Review Detail (`/review/{id}`)
 - Large photo previews with click-to-zoom lightbox
-- Full EXIF panel per photo: resolution, megapixels, sharpness, brightness, camera, GPS, capture date
-- Confidence score with colour coding
-- Change Keeper button per photo
+- Full EXIF panel: resolution, megapixels, sharpness, brightness, camera, GPS, capture date
+- Confidence score (green/amber/red)
+- Change Keeper button
 - Previous / Next navigation
 - All keyboard shortcuts active
 
@@ -281,47 +379,34 @@ Group status:  pending → approved_delete → moved → deleted
 
 ## Undo
 
-Every file movement is recorded in `move_history`. Three undo levels:
-
 | Action | Effect |
 |---|---|
 | **Undo Last** | Restores the single most recent moved file |
 | **Undo Group** | Restores all files in a specific group |
 | **Undo All** | Restores every file currently in `_permanent_delete/` |
 
-Undo is only possible before permanent deletion. After `Delete Permanently`, the record remains but the file is gone.
-
 ---
 
 ## Confidence Score
 
-Every duplicate group shows a 0–100% confidence score based on:
-
-| Signal | Passes that use it |
-|---|---|
-| pHash Hamming distance | burst, similar |
-| Time delta between frames | burst |
-| Number of heuristics matched | screenshot |
-| Distance from quality threshold | blurry, dark, overexposed |
-| MD5 match | exact (always 100%) |
-
-**Green (≥75%)** — high confidence, safe to approve without detailed review  
-**Amber (50–74%)** — worth a quick look before approving  
-**Red (<50%)** — review carefully; these are the most subjective detections
+| Score | Colour | Meaning |
+|---|---|---|
+| ≥ 75% | Green | High confidence — safe to approve |
+| 50–74% | Amber | Worth a quick look |
+| < 50% | Red | Review carefully |
 
 ---
 
 ## Tuning Guide
 
-### pHash threshold (burst + similar passes)
+### pHash threshold
 
 | Threshold | Meaning |
 |---|---|
 | 0–4 | Near-pixel-perfect — same shot |
 | 5–10 | Very similar — typical burst frames **(burst default: 10)** |
-| 5–8 | Similar scene — conservative cross-session **(similar default: 8)** |
-| 11–15 | Possible lighting/angle variation — risk of false positives |
-| >15 | Not recommended |
+| 5–8 | Conservative cross-session **(similar default: 8)** |
+| > 15 | Risk of false positives — not recommended |
 
 ### Blur threshold (Laplacian variance)
 
@@ -330,49 +415,37 @@ Every duplicate group shows a 0–100% confidence score based on:
 | 30–50 | Only severely out-of-focus shots |
 | 80 | Noticeably blurry **(default)** |
 | 150 | Mild motion blur |
-| 300+ | May flag intentional soft-focus portraits |
-
-### Burst window
-
-| Window | Typical result |
-|---|---|
-| 1s | Only camera burst modes (rapid fire) |
-| 3s | Burst + quick re-shots **(default)** |
-| 5s | More aggressive — review carefully |
-
----
-
-## Legacy CLI Mode
-
-The original `dedupe.py` single-file tool in `../photo-dedup/` still works unchanged. The new `app.py --execute` flag preserves backwards compatibility with the old workflow:
-
-```bash
-# Old tool (still works)
-python ../photo-dedup/dedupe.py --folder ~/Downloads/MyAlbum --execute
-
-# New tool, legacy mode (same behaviour)
-python app.py --folder ~/Downloads/MyAlbum --execute
-```
-
-The legacy mode skips the web UI, runs all passes, approves everything automatically, and moves files to `_permanent_delete/` in one shot. Use it only if you've already reviewed the results and trust the defaults.
+| 300+ | May flag soft-focus portraits |
 
 ---
 
 ## Safety Guarantees
 
-- **Nothing moves during a scan** — analysis is read-only until you explicitly approve
-- **Two-phase deletion** — approval and physical movement are separate steps
-- **Full undo** — every move is logged in SQLite; restore any file until permanent deletion
-- **No auto-delete** — permanent deletion requires an explicit button click in the UI
-- **Conflict-safe moves** — if a filename already exists in `_permanent_delete/`, a unique suffix is added automatically
-- **Offline-first** — zero network requests at any point; all CSS and JS are local files
+- Nothing moves during scan — analysis is read-only until you explicitly approve
+- Two-phase deletion — approval and physical movement are separate steps
+- Full undo — every move is logged in SQLite until permanent deletion
+- No auto-delete — permanent deletion requires an explicit button click
+- Conflict-safe moves — duplicate filenames get a unique suffix automatically
+- Offline-first — zero network requests; all CSS and JS are local files
+
+---
+
+## Legacy CLI Mode
+
+```bash
+# Skip the folder picker, scan directly (power users / scripting)
+python app.py --folder ~/Downloads/MyAlbum --review
+
+# Old single-file tool (still works unchanged)
+python ../photo-dedup/dedupe.py --folder ~/Downloads/MyAlbum --execute
+```
 
 ---
 
 ## Limitations
 
-- **HEIC files** — OpenCV cannot decode HEIC natively. Sharpness and brightness analysis are skipped for HEIC; all other passes (MD5, pHash via Pillow, EXIF, screenshots) still work. Install `pillow-heif` for full support: `pip install pillow-heif`
-- **No EXIF timestamps** — photos without `DateTimeOriginal` are skipped in the burst pass but are still processed by all other passes
-- **Large albums (>20k photos)** — the `similar` pass (cross-session near-duplicates) may take several minutes on first scan even with the BK-tree. Run `--passes exact,burst,blur,screenshot` first; add `similar` as a separate step
-- **Google Photos does not provide a deletion API** — the final step (removing from Google Photos) is always manual
-- **Single user** — the web server binds to `127.0.0.1` only and has no authentication. Do not expose it on a network interface
+- **HEIC files** — OpenCV cannot decode HEIC natively. Sharpness/brightness are skipped; MD5, pHash, EXIF, and screenshot detection still work. Install `pillow-heif` for full support: `pip install pillow-heif --index-url https://pypi.org/simple/`
+- **No EXIF timestamps** — photos without `DateTimeOriginal` are skipped in the burst pass but processed by all other passes
+- **Large albums (>20k photos)** — the `similar` pass may take several minutes. Run `--passes exact,burst,blur,screenshot` first, add `similar` separately
+- **Google Photos deletion API** — Google does not offer one; the final removal from Google Photos is always manual
+- **Single user** — the server binds to `127.0.0.1` only. Do not expose it on a network interface

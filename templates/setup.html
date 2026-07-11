@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Select Folder — Photo Deduplicator</title>
+<link rel="stylesheet" href="/static/app.css">
+<style>
+  .setup-wrap {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--bg);
+    padding: 24px;
+  }
+  .setup-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 40px 44px;
+    width: 100%;
+    max-width: 620px;
+    box-shadow: 0 4px 24px rgba(0,0,0,.10);
+  }
+  .setup-logo {
+    font-size: 2rem;
+    font-weight: 700;
+    margin-bottom: 4px;
+    color: var(--text);
+  }
+  .setup-logo span { color: var(--accent); }
+  .setup-sub {
+    color: var(--text-muted);
+    font-size: .88rem;
+    margin-bottom: 28px;
+  }
+  .path-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .path-input {
+    flex: 1;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text);
+    padding: 9px 12px;
+    font-size: .88rem;
+    font-family: monospace;
+    outline: none;
+    transition: border-color .15s;
+  }
+  .path-input:focus { border-color: var(--accent); }
+
+  /* folder browser */
+  .browser-box {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 14px;
+    max-height: 260px;
+    overflow-y: auto;
+    display: none;
+  }
+  .browser-box.open { display: block; }
+  .browser-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: .78rem;
+    color: var(--text-muted);
+    position: sticky;
+    top: 0;
+    background: var(--surface2);
+  }
+  .browser-crumb {
+    font-family: monospace;
+    font-size: .75rem;
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .browser-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    cursor: pointer;
+    font-size: .82rem;
+    border-bottom: 1px solid var(--border);
+    transition: background .1s;
+  }
+  .browser-item:last-child { border-bottom: none; }
+  .browser-item:hover { background: var(--surface); }
+  .browser-item .icon { opacity: .5; flex-shrink: 0; }
+  .browser-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: .82rem;
+  }
+
+  /* scan progress */
+  .scan-section {
+    display: none;
+    margin-top: 16px;
+  }
+  .scan-section.open { display: block; }
+  .scan-label {
+    font-size: .82rem;
+    color: var(--text-muted);
+    margin-bottom: 6px;
+  }
+  #setup-scan-msg {
+    font-size: .78rem;
+    color: var(--text-muted);
+    margin-top: 6px;
+    min-height: 16px;
+  }
+
+  .path-hint {
+    font-size: .75rem;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+    line-height: 1.6;
+  }
+  .path-hint code {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 1px 5px;
+    font-size: .72rem;
+  }
+
+  .recent-section { margin-bottom: 20px; }
+  .recent-label {
+    font-size: .72rem;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .recent-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: .82rem;
+    font-family: monospace;
+    color: var(--text);
+    border: 1px solid var(--border);
+    margin-bottom: 4px;
+    background: var(--surface2);
+    transition: background .15s;
+  }
+  .recent-item:hover { background: var(--surface); border-color: var(--accent); }
+  .theme-row { text-align: right; margin-bottom: 12px; }
+</style>
+</head>
+<body>
+<div class="setup-wrap">
+  <div class="setup-card">
+
+    <div class="theme-row">
+      <button onclick="toggleTheme()" id="theme-toggle" class="btn btn-ghost btn-sm">☾ Dark</button>
+    </div>
+
+    <div class="setup-logo">📷 <span>Photo</span>Dedup</div>
+    <div class="setup-sub">Offline duplicate photo cleaner — no cloud, no AI, no data leaves your machine.</div>
+
+    <!-- Recent folders -->
+    <div class="recent-section" id="recent-section" style="display:none">
+      <div class="recent-label">Recent Folders</div>
+      <div id="recent-list"></div>
+    </div>
+
+    <!-- Path input + browse button -->
+    <div class="path-row">
+      <input
+        type="text"
+        id="folder-input"
+        class="path-input"
+        placeholder="Paste or type your photo folder path…"
+        value="{{ current_folder }}"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <button onclick="toggleBrowser()" class="btn btn-ghost" id="browse-btn" title="Browse folders">
+        📁 Browse
+      </button>
+    </div>
+
+    <!-- Platform path hints -->
+    <div class="path-hint">
+      <strong>Windows:</strong> <code>C:\Users\YourName\Pictures\Goa2023</code> &nbsp;·&nbsp;
+      <strong>Mac/Linux:</strong> <code>/Users/yourname/Downloads/Goa2023</code>
+    </div>
+
+    <!-- Folder browser widget -->
+    <div class="browser-box" id="browser-box">
+      <div class="browser-header">
+        <button onclick="browserUp()" class="btn btn-ghost btn-sm btn-icon" id="browser-up" title="Parent folder">↑</button>
+        <span class="browser-crumb" id="browser-crumb">…</span>
+      </div>
+      <div id="browser-list"></div>
+    </div>
+
+    <!-- Start button -->
+    <button onclick="startWithFolder()" class="btn btn-primary w-full" id="start-btn"
+            style="padding:10px; font-size:.95rem; margin-bottom:12px;">
+      ▶ Start Scanning
+    </button>
+
+    <!-- Scan progress (shown after submit) -->
+    <div class="scan-section" id="scan-section">
+      <div class="scan-label">Scanning photos…</div>
+      <div class="progress-wrap">
+        <div class="progress-bar" id="setup-progress-bar" style="width:0%"></div>
+      </div>
+      <div id="setup-scan-msg"></div>
+    </div>
+
+  </div>
+</div>
+
+<div id="toast-container"></div>
+<script src="/static/app.js"></script>
+<script>
+// ── recent folders (localStorage) ──────────────────────────────────────────
+const RECENT_KEY = "pd-recent-folders";
+const MAX_RECENT = 5;
+
+function getRecent() {
+  try { return JSON.parse(localStorage.getItem(RECENT_KEY) || "[]"); }
+  catch { return []; }
+}
+function saveRecent(folder) {
+  let list = getRecent().filter(f => f !== folder);
+  list.unshift(folder);
+  list = list.slice(0, MAX_RECENT);
+  localStorage.setItem(RECENT_KEY, JSON.stringify(list));
+}
+function renderRecent() {
+  const list = getRecent();
+  const section = document.getElementById("recent-section");
+  const el = document.getElementById("recent-list");
+  if (!list.length) { section.style.display = "none"; return; }
+  section.style.display = "block";
+  el.innerHTML = list.map(f => `
+    <div class="recent-item" onclick="pickRecent('${f.replace(/'/g, "\\'")}')">
+      📁 ${f}
+    </div>
+  `).join("");
+}
+function pickRecent(folder) {
+  document.getElementById("folder-input").value = folder;
+  startWithFolder();
+}
+
+// ── folder browser ──────────────────────────────────────────────────────────
+let _browserOpen = false;
+
+function toggleBrowser() {
+  _browserOpen = !_browserOpen;
+  document.getElementById("browser-box").classList.toggle("open", _browserOpen);
+  if (_browserOpen) loadBrowser("");
+}
+
+async function loadBrowser(path) {
+  const listEl = document.getElementById("browser-list");
+  const crumb  = document.getElementById("browser-crumb");
+  const upBtn  = document.getElementById("browser-up");
+
+  listEl.innerHTML = '<div class="browser-empty">Loading…</div>';
+  try {
+    const res = await fetch("/api/browse?path=" + encodeURIComponent(path));
+    const data = await res.json();
+
+    crumb.textContent = data.path || "Select a drive";
+    upBtn.disabled = !data.parent;
+
+    // Store current path for up-navigation
+    upBtn.dataset.parent = data.parent || "";
+
+    if (!data.dirs.length) {
+      listEl.innerHTML = '<div class="browser-empty">No sub-folders found</div>';
+    } else {
+      listEl.innerHTML = data.dirs.map(d => `
+        <div class="browser-item" onclick="selectBrowserItem('${d.path.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}')">
+          <span class="icon">📁</span>
+          <span>${d.name}</span>
+        </div>
+      `).join("");
+    }
+
+    // Pre-fill input with current browsed path
+    document.getElementById("folder-input").value = data.path;
+  } catch(e) {
+    listEl.innerHTML = '<div class="browser-empty">Error loading folders</div>';
+  }
+}
+
+function selectBrowserItem(path) {
+  document.getElementById("folder-input").value = path;
+  loadBrowser(path);
+}
+
+function browserUp() {
+  const parent = document.getElementById("browser-up").dataset.parent;
+  if (parent) loadBrowser(parent);
+}
+
+// ── start scan ──────────────────────────────────────────────────────────────
+async function startWithFolder() {
+  const folder = document.getElementById("folder-input").value.trim();
+  if (!folder) { toast("Please enter or browse to a folder path", "error"); return; }
+
+  const btn = document.getElementById("start-btn");
+  btn.disabled = true;
+  btn.textContent = "Starting…";
+
+  try {
+    const res = await fetch("/api/folder", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ folder }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      toast(data.detail || "Invalid folder path", "error");
+      btn.disabled = false;
+      btn.textContent = "▶ Start Scanning";
+      return;
+    }
+
+    saveRecent(folder);
+
+    // Show progress bar and follow SSE
+    document.getElementById("scan-section").classList.add("open");
+    btn.textContent = "Scanning…";
+
+    const bar = document.getElementById("setup-progress-bar");
+    const msg = document.getElementById("setup-scan-msg");
+
+    const es = new EventSource("/api/scan/status");
+    es.onmessage = (e) => {
+      const d = JSON.parse(e.data);
+      const pct = d.total > 0 ? Math.round(d.current / d.total * 100) : 0;
+      bar.style.width = pct + "%";
+      msg.textContent = d.message || "";
+
+      if (d.error) {
+        toast("Scan error: " + d.error, "error");
+        es.close();
+        btn.disabled = false;
+        btn.textContent = "▶ Retry";
+        return;
+      }
+      if (d.done) {
+        es.close();
+        msg.textContent = "Done! Redirecting…";
+        bar.style.width = "100%";
+        setTimeout(() => { window.location.href = "/"; }, 800);
+      }
+    };
+    es.onerror = () => {
+      es.close();
+      toast("Lost connection to server", "error");
+      btn.disabled = false;
+      btn.textContent = "▶ Retry";
+    };
+  } catch(e) {
+    toast("Error: " + e.message, "error");
+    btn.disabled = false;
+    btn.textContent = "▶ Start Scanning";
+  }
+}
+
+// Allow pressing Enter in the input field
+document.getElementById("folder-input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter") startWithFolder();
+});
+
+// Pre-fill and show recent on load
+renderRecent();
+
+// If a folder was already active, pre-open browser to it
+const cur = document.getElementById("folder-input").value;
+if (cur) loadBrowser(cur);
+</script>
+</body>
+</html>

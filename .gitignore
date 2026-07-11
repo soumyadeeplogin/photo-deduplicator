@@ -5,6 +5,7 @@ logs/
 _permanent_delete/
 dedup_report.csv
 dedup_report.json
+*.log
 
 # ── Python ────────────────────────────────────────────────────────────────────
 __pycache__/
