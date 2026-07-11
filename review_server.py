@@ -114,8 +114,9 @@ def create_app(
     async def dashboard(request: Request):
         stats = db.get_stats()
         return templates.TemplateResponse(
+            request,
             "dashboard.html",
-            {"request": request, "stats": stats, "folder": str(folder)},
+            {"stats": stats, "folder": str(folder)},
         )
 
     # ── review list ───────────────────────────────────────────────────────
@@ -146,9 +147,9 @@ def create_app(
             enriched.append({"group": g, "photos": photo_map})
 
         return templates.TemplateResponse(
+            request,
             "review_list.html",
             {
-                "request": request,
                 "groups": enriched,
                 "page": page,
                 "per_page": per_page,
@@ -182,9 +183,9 @@ def create_app(
             prev_id = next_id = None
 
         return templates.TemplateResponse(
+            request,
             "review_detail.html",
             {
-                "request": request,
                 "group": group,
                 "photos": photo_map,
                 "prev_id": prev_id,
@@ -317,9 +318,9 @@ def create_app(
             photo_map = {p.id: p for p in photos}
             enriched.append({"group": g, "photos": photo_map})
         return templates.TemplateResponse(
+            request,
             "report.html",
             {
-                "request": request,
                 "groups": enriched,
                 "stats": stats,
                 "folder": str(folder),
