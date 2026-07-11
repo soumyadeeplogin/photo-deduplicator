@@ -1,0 +1,156 @@
+{% extends "base.html" %}
+{% block title %}Review Groups — Photo Deduplicator{% endblock %}
+{% block page_title %}Review Groups{% endblock %}
+
+{% block topbar_actions %}
+  <span class="text-muted text-sm">{{ total }} group{{ 's' if total != 1 }}</span>
+  <button onclick="processApproved()" class="btn btn-danger btn-sm">▶ Process Approved</button>
+  <button onclick="undoLast()" class="btn btn-ghost btn-sm">↩ Undo Last</button>
+{% endblock %}
+
+{% block content %}
+
+{# ── filter bar ───────────────────────────────────────────────────────── #}
+<form method="get" action="/review" class="filter-bar">
+  <div class="filter-group">
+    <label>Category</label>
+    <select name="reason">
+      <option value="">All</option>
+      {% for r in reason_order %}
+        <option value="{{ r }}" {% if filters.reason == r %}selected{% endif %}>
+          {{ reason_labels[r] }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Status</label>
+    <select name="status">
+      <option value="">All</option>
+      {% for s in ['pending','approved_delete','kept','skipped','moved'] %}
+        <option value="{{ s }}" {% if filters.status == s %}selected{% endif %}>
+          {{ s.replace('_', ' ').title() }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Sort</label>
+    <select name="order">
+      <option value="created_at" {% if filters.order == 'created_at' %}selected{% endif %}>Date</option>
+      <option value="confidence" {% if filters.order == 'confidence' %}selected{% endif %}>Confidence</option>
+      <option value="reason"     {% if filters.order == 'reason' %}selected{% endif %}>Category</option>
+    </select>
+  </div>
+  <div class="filter-group">
+    <label>Search filename / folder</label>
+    <input type="text" name="search" value="{{ filters.search or '' }}" placeholder="IMG_3201…" style="width:200px;">
+  </div>
+  <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end;">Apply</button>
+  <a href="/review" class="btn btn-ghost btn-sm" style="align-self:flex-end;">Reset</a>
+</form>
+
+{# ── group list ───────────────────────────────────────────────────────── #}
+{% if not groups %}
+  <div class="card" style="text-align:center; padding:40px; color:var(--text-muted);">
+    No groups match the current filters.
+  </div>
+{% endif %}
+
+{% for item in groups %}
+  {% set g = item.group %}
+  {% set photo_map = item.photos %}
+  <div class="group-card" data-group-id="{{ g.id }}" data-status="{{ g.review_status.value }}">
+    <div class="group-header">
+      <a href="/review/{{ g.id }}">#{{ g.id }}</a>
+      <span class="pill pill-{{ g.reason.value }}">{{ reason_labels[g.reason.value] }}</span>
+      <span class="status-chip status-{{ g.review_status.value }}">
+        {{ g.review_status.value.replace('_', ' ') }}
+      </span>
+
+      {# confidence bar #}
+      {% set pct = (g.confidence * 100) | int %}
+      {% set cls = 'conf-high' if g.confidence >= 0.75 else ('conf-medium' if g.confidence >= 0.5 else 'conf-low') %}
+      <div class="conf-bar {{ cls }}">
+        <div class="conf-track"><div class="conf-fill" style="width:{{ pct }}%"></div></div>
+        <span class="conf-num">{{ pct }}%</span>
+      </div>
+
+      <span class="group-notes">{{ g.notes }}</span>
+    </div>
+
+    <div class="group-photos">
+      {% for photo_id in g.member_ids %}
+        {% set p = photo_map.get(photo_id) %}
+        {% if p %}
+          {% set is_keep = (photo_id == g.keeper_id) %}
+          <a href="/review/{{ g.id }}" title="{{ p.filename }}" style="text-decoration:none;">
+            <div class="photo-card {{ 'is-keep' if is_keep else 'is-trash' }}">
+              {% if p.thumbnail_path %}
+                <img class="photo-thumb"
+                     src="/cache/thumbnails/{{ p.thumbnail_path.split('/')[-1] }}"
+                     alt="{{ p.filename }}"
+                     loading="lazy">
+              {% else %}
+                <div class="photo-thumb-placeholder">no thumb</div>
+              {% endif %}
+              <span class="photo-label {{ 'label-keep' if is_keep else 'label-trash' }}">
+                {{ 'KEEP' if is_keep else 'TRASH' }}
+              </span>
+              <div class="photo-meta">
+                <strong>{{ p.filename[:24] }}{{ '…' if p.filename | length > 24 }}</strong><br>
+                {{ p.size_bytes | fmt_size }}
+                {% if p.sharpness %} · ⬡{{ p.sharpness | int }}{% endif %}
+              </div>
+            </div>
+          </a>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    <div class="group-actions">
+      {% if g.review_status.value == 'pending' %}
+        <button onclick="approveGroup({{ g.id }})" class="btn btn-danger btn-sm">✓ Approve Delete</button>
+        <button onclick="skipGroup({{ g.id }})"    class="btn btn-ghost btn-sm">Skip</button>
+      {% elif g.review_status.value == 'approved_delete' %}
+        <button onclick="unapproveGroup({{ g.id }})" class="btn btn-ghost btn-sm">↩ Unapprove</button>
+      {% elif g.review_status.value == 'moved' %}
+        <button onclick="undoGroup({{ g.id }})" class="btn btn-ghost btn-sm">↩ Restore</button>
+      {% endif %}
+      <a href="/review/{{ g.id }}" class="btn btn-ghost btn-sm ml-auto">Detail →</a>
+    </div>
+  </div>
+{% endfor %}
+
+{# ── pagination ───────────────────────────────────────────────────────── #}
+{% if total_pages > 1 %}
+  <div class="pagination">
+    {% set base_url = '/review?' %}
+    {% if filters.reason %}{% set base_url = base_url + 'reason=' + filters.reason + '&' %}{% endif %}
+    {% if filters.status %}{% set base_url = base_url + 'status=' + filters.status + '&' %}{% endif %}
+    {% if filters.search %}{% set base_url = base_url + 'search=' + filters.search + '&' %}{% endif %}
+    {% if filters.order  %}{% set base_url = base_url + 'order=' + filters.order + '&' %}{% endif %}
+
+    {% if page > 1 %}
+      <a href="{{ base_url }}page={{ page - 1 }}" class="page-btn">‹</a>
+    {% else %}
+      <button class="page-btn" disabled>‹</button>
+    {% endif %}
+
+    {% for p in range([1, page - 2] | max, [total_pages + 1, page + 3] | min) %}
+      <a href="{{ base_url }}page={{ p }}" class="page-btn {{ 'active' if p == page }}">{{ p }}</a>
+    {% endfor %}
+
+    {% if page < total_pages %}
+      <a href="{{ base_url }}page={{ page + 1 }}" class="page-btn">›</a>
+    {% else %}
+      <button class="page-btn" disabled>›</button>
+    {% endif %}
+
+    <span class="text-muted text-sm" style="margin-left:8px;">
+      Page {{ page }} of {{ total_pages }}
+    </span>
+  </div>
+{% endif %}
+
+{% endblock %}

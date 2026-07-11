@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Dashboard — Photo Deduplicator{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block topbar_actions %}
+  <button onclick="startScan()" class="btn btn-primary btn-sm">⟳ Re-scan</button>
+  <button onclick="processApproved()" class="btn btn-danger btn-sm">▶ Process Approved</button>
+{% endblock %}
+
+{% block content %}
+
+{# ── stats row ─────────────────────────────────────────────────────────── #}
+<div class="stat-grid mb-3">
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.total_photos }}</div>
+    <div class="stat-lbl">Total Photos</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.total_size_bytes | fmt_size }}</div>
+    <div class="stat-lbl">Album Size</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.flagged_size_bytes | fmt_size }}</div>
+    <div class="stat-lbl">Space to Save</div>
+  </div>
+  {% set total_groups = stats.by_reason.values() | sum %}
+  <div class="stat-card">
+    <div class="stat-val">{{ total_groups }}</div>
+    <div class="stat-lbl">Groups Found</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.by_status.get('pending', 0) }}</div>
+    <div class="stat-lbl">Pending Review</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.by_status.get('approved_delete', 0) }}</div>
+    <div class="stat-lbl">Approved Delete</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.by_status.get('moved', 0) }}</div>
+    <div class="stat-lbl">In Permanent Delete</div>
+  </div>
+</div>
+
+{# ── by-reason breakdown ───────────────────────────────────────────────── #}
+<div class="card mb-3">
+  <h3 style="margin:0 0 12px; font-size:.9rem;">Groups by Category</h3>
+  <div style="display:flex; gap:10px; flex-wrap:wrap;">
+    {% for reason in reason_order %}
+      {% if stats.by_reason.get(reason, 0) > 0 %}
+        <a href="/review?reason={{ reason }}" style="text-decoration:none;">
+          <div style="display:flex;align-items:center;gap:8px;background:var(--surface2);
+                      border:1px solid var(--border);border-radius:8px;padding:8px 14px;">
+            <span class="pill pill-{{ reason }}">{{ reason_labels[reason] }}</span>
+            <strong>{{ stats.by_reason[reason] }}</strong>
+          </div>
+        </a>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+{# ── workflow guide ────────────────────────────────────────────────────── #}
+<div class="card mb-3">
+  <h3 style="margin:0 0 12px; font-size:.9rem;">Workflow</h3>
+  <div style="display:flex; gap:0; flex-wrap:wrap; align-items:center; font-size:.82rem;">
+    {% set steps = [
+      ('1', 'Scan', 'Photos analysed and grouped'),
+      ('2', 'Review', 'Inspect each group in /review'),
+      ('3', 'Approve Delete', 'Click Approve on groups you agree with'),
+      ('4', 'Process', 'Move approved files to _permanent_delete/'),
+      ('5', 'Delete', 'Permanently remove from _permanent_delete/'),
+    ] %}
+    {% for num, title, desc in steps %}
+      <div style="padding:8px 12px; background:var(--surface2); border-radius:6px;
+                  border:1px solid var(--border); min-width:120px; text-align:center;">
+        <div style="font-size:1rem; font-weight:700; color:var(--accent);">{{ num }}</div>
+        <div style="font-weight:600;">{{ title }}</div>
+        <div style="color:var(--text-muted); font-size:.72rem;">{{ desc }}</div>
+      </div>
+      {% if not loop.last %}
+        <div style="padding:0 6px; color:var(--text-muted); font-size:1.2rem;">→</div>
+      {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+{# ── keyboard shortcuts ────────────────────────────────────────────────── #}
+<div class="card">
+  <h3 style="margin:0 0 12px; font-size:.9rem;">Keyboard Shortcuts (in Review Detail)</h3>
+  <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap:6px; font-size:.8rem;">
+    {% set shortcuts = [
+      ('←  →', 'Previous / Next group'),
+      ('Space', 'Next group'),
+      ('D / K', 'Approve Delete'),
+      ('S', 'Skip group'),
+      ('R', 'Restore (undo group)'),
+      ('F', 'Fullscreen image'),
+      ('Ctrl+Z', 'Undo last action'),
+      ('Esc', 'Close lightbox'),
+    ] %}
+    {% for key, desc in shortcuts %}
+      <div class="flex items-center gap-2">
+        <kbd>{{ key }}</kbd>
+        <span class="text-muted">{{ desc }}</span>
+      </div>
+    {% endfor %}
+  </div>
+</div>
+
+{% endblock %}

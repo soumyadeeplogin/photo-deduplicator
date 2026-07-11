@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block title %}Full Report — Photo Deduplicator{% endblock %}
+{% block page_title %}Full Report{% endblock %}
+
+{% block topbar_actions %}
+  <a href="/report/csv"  class="btn btn-ghost btn-sm">⬇ CSV</a>
+  <a href="/report/json" class="btn btn-ghost btn-sm">⬇ JSON</a>
+{% endblock %}
+
+{% block content %}
+
+{# ── summary ──────────────────────────────────────────────────────────── #}
+<div class="stat-grid mb-3">
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.total_photos }}</div>
+    <div class="stat-lbl">Total Photos</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.total_size_bytes | fmt_size }}</div>
+    <div class="stat-lbl">Album Size</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-val">{{ stats.flagged_size_bytes | fmt_size }}</div>
+    <div class="stat-lbl">Potential Savings</div>
+  </div>
+</div>
+
+{# ── groups by category ───────────────────────────────────────────────── #}
+{% set ns = namespace(current_reason=None) %}
+{% for item in groups %}
+  {% set g = item.group %}
+  {% set photo_map = item.photos %}
+
+  {% if g.reason.value != ns.current_reason %}
+    {% if ns.current_reason is not none %}
+      </div> {# close section #}
+    {% endif %}
+    {% set ns.current_reason = g.reason.value %}
+    <div class="card mb-3">
+      <h2 style="margin:0 0 12px; font-size:1rem;">
+        <span class="pill pill-{{ g.reason.value }}">{{ reason_labels[g.reason.value] }}</span>
+        <span class="text-muted text-sm" style="margin-left:8px;">{{ stats.by_reason.get(g.reason.value, 0) }} groups</span>
+      </h2>
+  {% endif %}
+
+  <div class="group-card" style="margin-bottom:8px;" data-group-id="{{ g.id }}">
+    <div class="group-header">
+      <a href="/review/{{ g.id }}">#{{ g.id }}</a>
+      <span class="status-chip status-{{ g.review_status.value }}">
+        {{ g.review_status.value.replace('_', ' ') }}
+      </span>
+      {% set pct = (g.confidence * 100) | int %}
+      {% set cls = 'conf-high' if g.confidence >= 0.75 else ('conf-medium' if g.confidence >= 0.5 else 'conf-low') %}
+      <div class="conf-bar {{ cls }}">
+        <div class="conf-track"><div class="conf-fill" style="width:{{ pct }}%"></div></div>
+        <span class="conf-num">{{ pct }}%</span>
+      </div>
+      <span class="group-notes">{{ g.notes }}</span>
+    </div>
+    <div class="group-photos">
+      {% for pid in g.member_ids %}
+        {% set p = photo_map.get(pid) %}
+        {% if p %}
+          {% set is_keep = (pid == g.keeper_id) %}
+          <div class="photo-card {{ 'is-keep' if is_keep else 'is-trash' }}">
+            {% if p.thumbnail_path %}
+              <img class="photo-thumb"
+                   src="/cache/thumbnails/{{ p.thumbnail_path.split('/')[-1] }}"
+                   loading="lazy" alt="{{ p.filename }}"
+                   onclick="openLightbox('/photo/{{ p.id }}/original')">
+            {% else %}
+              <div class="photo-thumb-placeholder">no preview</div>
+            {% endif %}
+            <span class="photo-label {{ 'label-keep' if is_keep else 'label-trash' }}">
+              {{ 'KEEP' if is_keep else 'TRASH' }}
+            </span>
+            <div class="photo-meta">
+              {{ p.filename[:20] }}{{ '…' if p.filename | length > 20 }}<br>
+              {{ p.size_bytes | fmt_size }}
+              {% if p.sharpness %} · ⬡{{ p.sharpness | int }}{% endif %}
+            </div>
+          </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+{% endfor %}
+{% if ns.current_reason is not none %}
+  </div> {# close last section #}
+{% endif %}
+
+{% if not groups %}
+  <div class="card" style="text-align:center; padding:40px; color:var(--text-muted);">
+    No groups found. Run a scan first.
+  </div>
+{% endif %}
+
+{% endblock %}

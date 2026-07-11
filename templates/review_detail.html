@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}Group #{{ group.id }} — Photo Deduplicator{% endblock %}
+{% block page_title %}Group #{{ group.id }} — {{ reason_labels[group.reason.value] }}{% endblock %}
+
+{# Pass navigation + current group id to JS via data attributes #}
+{% block body_attrs %}
+  data-group-id="{{ group.id }}"
+  data-prev-id="{{ prev_id or '' }}"
+  data-next-id="{{ next_id or '' }}"
+{% endblock %}
+
+{% block topbar_actions %}
+  <span class="kbd-hint"><kbd>←</kbd> Prev</span>
+  <span class="kbd-hint"><kbd>→</kbd> Next</span>
+
+  {% if prev_id %}
+    <a href="/review/{{ prev_id }}" class="btn btn-ghost btn-sm">← Prev</a>
+  {% endif %}
+  {% if next_id %}
+    <a href="/review/{{ next_id }}" class="btn btn-ghost btn-sm">Next →</a>
+  {% endif %}
+
+  <a href="/review" class="btn btn-ghost btn-sm">List</a>
+{% endblock %}
+
+{% block content %}
+
+{# ── group meta row ───────────────────────────────────────────────────── #}
+<div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap;">
+  <span class="pill pill-{{ group.reason.value }}">{{ reason_labels[group.reason.value] }}</span>
+  <span class="status-chip status-{{ group.review_status.value }}">
+    {{ group.review_status.value.replace('_', ' ') }}
+  </span>
+
+  {% set pct = (group.confidence * 100) | int %}
+  {% set cls = 'conf-high' if group.confidence >= 0.75 else ('conf-medium' if group.confidence >= 0.5 else 'conf-low') %}
+  <div class="conf-bar {{ cls }}">
+    <strong>Confidence:</strong>&nbsp;
+    <div class="conf-track"><div class="conf-fill" style="width:{{ pct }}%"></div></div>
+    <span class="conf-num">{{ pct }}%</span>
+  </div>
+
+  <span class="text-muted text-sm" style="margin-left:8px;">{{ group.notes }}</span>
+</div>
+
+{# ── action buttons ───────────────────────────────────────────────────── #}
+<div class="flex gap-2 mb-3" style="flex-wrap:wrap;">
+  {% if group.review_status.value == 'pending' %}
+    <button onclick="approveGroup({{ group.id }})" class="btn btn-danger">
+      ✓ Approve Delete <span class="kbd-hint"><kbd>D</kbd></span>
+    </button>
+    <button onclick="skipGroup({{ group.id }})" class="btn btn-ghost">
+      Skip <span class="kbd-hint"><kbd>S</kbd></span>
+    </button>
+  {% elif group.review_status.value == 'approved_delete' %}
+    <button onclick="unapproveGroup({{ group.id }})" class="btn btn-ghost">
+      ↩ Unapprove <span class="kbd-hint"><kbd>R</kbd></span>
+    </button>
+  {% elif group.review_status.value in ['moved'] %}
+    <button onclick="undoGroup({{ group.id }})" class="btn btn-ghost">
+      ↩ Restore all <span class="kbd-hint"><kbd>R</kbd></span>
+    </button>
+  {% endif %}
+
+  {% if prev_id %}
+    <a href="/review/{{ prev_id }}" class="btn btn-ghost">
+      ← Prev <span class="kbd-hint"><kbd>←</kbd></span>
+    </a>
+  {% endif %}
+  {% if next_id %}
+    <a href="/review/{{ next_id }}" class="btn btn-ghost">
+      Next → <span class="kbd-hint"><kbd>Space</kbd></span>
+    </a>
+  {% endif %}
+</div>
+
+{# ── photo cards ──────────────────────────────────────────────────────── #}
+<div class="detail-grid">
+  {% for photo_id in group.member_ids %}
+    {% set p = photos.get(photo_id) %}
+    {% if p %}
+      {% set is_keep = (photo_id == group.keeper_id) %}
+      <div class="detail-photo {{ 'is-keep' if is_keep else 'is-trash' }}">
+
+        {# image with click-to-zoom #}
+        {% if p.thumbnail_path %}
+          <img src="/cache/thumbnails/{{ p.thumbnail_path.split('/')[-1] }}"
+               alt="{{ p.filename }}"
+               onclick="openLightbox('/photo/{{ p.id }}/original')"
+               title="Click to view full size (F for fullscreen)">
+        {% else %}
+          <div class="photo-thumb-placeholder" style="height:200px;">No preview</div>
+        {% endif %}
+
+        <div class="detail-photo-meta">
+          <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap;">
+            <span class="photo-label {{ 'label-keep' if is_keep else 'label-trash' }}"
+                  style="position:static; font-size:.75rem;">
+              {{ 'KEEP' if is_keep else 'TRASH' }}
+            </span>
+            <strong style="font-size:.85rem;">{{ p.filename }}</strong>
+            <a href="/photo/{{ p.id }}/original" target="_blank"
+               class="btn btn-ghost btn-sm ml-auto" title="Open original (O)">⬡ Original</a>
+            {% if not is_keep and group.review_status.value == 'pending' %}
+              <button onclick="changeKeeper({{ group.id }}, {{ p.id }}); location.reload();"
+                      class="btn btn-ghost btn-sm" title="Make this the keeper">☆ Make Keeper</button>
+            {% endif %}
+          </div>
+
+          <table>
+            <tr><td>Size</td><td>{{ p.size_bytes | fmt_size }}</td></tr>
+            <tr><td>Resolution</td><td>{{ p.resolution_str }}</td></tr>
+            {% if p.megapixels %}<tr><td>Megapixels</td><td>{{ p.megapixels }} MP</td></tr>{% endif %}
+            {% if p.sharpness is not none %}
+              <tr>
+                <td>Sharpness</td>
+                <td>
+                  {{ p.sharpness | round(1) }}
+                  <span class="text-muted text-sm">(Laplacian)</span>
+                </td>
+              </tr>
+            {% endif %}
+            {% if p.brightness is not none %}
+              <tr><td>Brightness</td><td>{{ p.brightness | round(1) }} / 255</td></tr>
+            {% endif %}
+            {% if p.shot_time %}
+              <tr><td>Taken</td><td>{{ p.shot_time.strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>
+            {% endif %}
+            {% if p.camera_make or p.camera_model %}
+              <tr>
+                <td>Camera</td>
+                <td>{{ [p.camera_make, p.camera_model] | select | join(' ') }}</td>
+              </tr>
+            {% endif %}
+            {% if p.gps_lat and p.gps_lon %}
+              <tr>
+                <td>GPS</td>
+                <td class="font-mono" style="font-size:.72rem;">
+                  {{ '%.5f' | format(p.gps_lat) }}, {{ '%.5f' | format(p.gps_lon) }}
+                </td>
+              </tr>
+            {% endif %}
+            <tr>
+              <td>Status</td>
+              <td><span class="status-chip status-{{ p.review_status.value }}">{{ p.review_status.value.replace('_',' ') }}</span></td>
+            </tr>
+            <tr>
+              <td>Path</td>
+              <td class="font-mono" style="font-size:.68rem; word-break:break-all;">{{ p.path }}</td>
+            </tr>
+          </table>
+        </div>
+      </div>
+    {% endif %}
+  {% endfor %}
+</div>
+
+{# ── bottom navigation ────────────────────────────────────────────────── #}
+<div class="flex gap-2 mt-4">
+  {% if prev_id %}
+    <a href="/review/{{ prev_id }}" class="btn btn-ghost">← Previous group</a>
+  {% endif %}
+  <a href="/review" class="btn btn-ghost">↑ Back to list</a>
+  {% if next_id %}
+    <a href="/review/{{ next_id }}" class="btn btn-primary ml-auto">Next group →</a>
+  {% endif %}
+</div>
+
+{% endblock %}

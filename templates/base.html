@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Photo Deduplicator{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+{% block head %}{% endblock %}
+</head>
+<body {% block body_attrs %}{% endblock %}>
+
+<div class="layout">
+  <!-- Sidebar -->
+  <nav class="sidebar">
+    <div class="sidebar-logo">📷 <span>Photo</span>Dedup</div>
+
+    <a href="/" class="nav-item {% if request.url.path == '/' %}active{% endif %}">
+      ⊞ Dashboard
+    </a>
+    <a href="/review" class="nav-item {% if request.url.path.startswith('/review') %}active{% endif %}">
+      ⬡ Review Groups
+      {% if stats is defined %}
+        <span class="badge">{{ stats.by_status.get('pending', 0) }}</span>
+      {% endif %}
+    </a>
+
+    <div class="sidebar-section">Filters</div>
+    <a href="/review?reason=exact_duplicate" class="nav-item">
+      <span class="pill pill-exact_duplicate" style="width:8px;height:8px;padding:0;border-radius:50%"></span>
+      Exact Dupes
+    </a>
+    <a href="/review?reason=burst" class="nav-item">
+      <span class="pill pill-burst" style="width:8px;height:8px;padding:0;border-radius:50%"></span>
+      Burst Shots
+    </a>
+    <a href="/review?reason=blurry" class="nav-item">
+      <span class="pill pill-blurry" style="width:8px;height:8px;padding:0;border-radius:50%"></span>
+      Blurry
+    </a>
+    <a href="/review?reason=screenshot" class="nav-item">
+      <span class="pill pill-screenshot" style="width:8px;height:8px;padding:0;border-radius:50%"></span>
+      Screenshots
+    </a>
+    <a href="/review?reason=similar" class="nav-item">
+      <span class="pill pill-similar" style="width:8px;height:8px;padding:0;border-radius:50%"></span>
+      Near-Dupes
+    </a>
+
+    <div class="sidebar-section">Actions</div>
+    <a href="#" onclick="processApproved();return false;" class="nav-item">▶ Process Approved</a>
+    <a href="#" onclick="undoLast();return false;" class="nav-item">↩ Undo Last</a>
+    <a href="#" onclick="startScan();return false;" class="nav-item">⟳ Re-scan</a>
+
+    <div class="sidebar-section">Reports</div>
+    <a href="/report/html" class="nav-item" target="_blank">HTML Report</a>
+    <a href="/report/csv"  class="nav-item">CSV Export</a>
+    <a href="/report/json" class="nav-item">JSON Export</a>
+
+    <div style="margin-top:auto; padding: 12px 16px;">
+      <button onclick="toggleTheme()" id="theme-toggle" class="btn btn-ghost btn-sm w-full">☾ Dark</button>
+    </div>
+  </nav>
+
+  <!-- Main area -->
+  <div class="main">
+    <div class="topbar">
+      <h1>{% block page_title %}Photo Deduplicator{% endblock %}</h1>
+      {% block topbar_actions %}{% endblock %}
+    </div>
+    <div class="content">
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <button id="lightbox-close" onclick="closeLightbox()">✕</button>
+  <img id="lightbox-img" src="" alt="Full size">
+</div>
+
+<!-- Scan overlay -->
+<div id="scan-overlay">
+  <div class="scan-modal">
+    <h2>⟳ Scanning Photos…</h2>
+    <div class="progress-wrap">
+      <div class="progress-bar" id="scan-progress-bar" style="width:0%"></div>
+    </div>
+    <div id="scan-message" class="text-muted mt-2"></div>
+  </div>
+</div>
+
+<!-- Toast container -->
+<div id="toast-container"></div>
+
+<script src="/static/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
