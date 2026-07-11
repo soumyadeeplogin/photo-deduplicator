@@ -75,14 +75,13 @@ def run_scan(folder: Path, db: Database, cfg: Config) -> None:
     analysed = scanner.scan(progress_cb=_progress)
     print()
 
+    print(f"\n  Running duplicate detection…")
+    engine = DuplicateEngine(db, cfg)
+    groups = engine.run(progress_cb=_progress)
+    print()
     if analysed > 0:
-        print(f"\n  Running duplicate detection…")
-        engine = DuplicateEngine(db, cfg)
-        groups = engine.run(progress_cb=_progress)
-        print()
-        print(f"  Created {groups} duplicate groups.")
-    else:
-        print("  All photos up-to-date.")
+        print(f"  Analysed {analysed} new/changed photos.")
+    print(f"  Created {groups} duplicate groups.")
 
     stats = db.get_stats()
     print(f"\n  Total photos : {stats['total_photos']}")

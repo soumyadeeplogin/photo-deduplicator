@@ -110,10 +110,11 @@ class Database:
             self._conn = None
 
     @contextmanager
-    def tx(self) -> Generator[sqlite3.Connection, None, None]:
+    def tx(self) -> Generator[sqlite3.Cursor, None, None]:
         assert self._conn, "call connect() first"
+        cursor = self._conn.cursor()
         try:
-            yield self._conn
+            yield cursor
             self._conn.commit()
         except Exception:
             self._conn.rollback()
