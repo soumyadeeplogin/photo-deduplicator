@@ -36,6 +36,12 @@
     <div class="stat-val">{{ stats.by_status.get('approved_delete', 0) }}</div>
     <div class="stat-lbl">Approved Delete</div>
   </div>
+  {% if stats.approved_size_bytes %}
+  <div class="stat-card" style="border-color:var(--green);">
+    <div class="stat-val" style="color:var(--green);">{{ stats.approved_size_bytes | fmt_size }}</div>
+    <div class="stat-lbl">Approved to Delete</div>
+  </div>
+  {% endif %}
   <div class="stat-card">
     <div class="stat-val">{{ stats.by_status.get('moved', 0) }}</div>
     <div class="stat-lbl">In Permanent Delete</div>

@@ -74,6 +74,40 @@
   {% endif %}
 </div>
 
+{# ── side-by-side comparison (only when group has exactly 2 members) ─── #}
+{% if group.member_ids | length == 2 %}
+  {% set pid_a = group.member_ids[0] %}
+  {% set pid_b = group.member_ids[1] %}
+  {% set pa = photos.get(pid_a) %}
+  {% set pb = photos.get(pid_b) %}
+  {% if pa and pb and pa.thumbnail_path and pb.thumbnail_path %}
+    {% set keep_id = group.keeper_id %}
+    {% set keep_p  = photos.get(keep_id) if keep_id else pa %}
+    {% set trash_p = pb if keep_p == pa else pa %}
+    <div class="card mb-3" style="padding:10px 14px;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+        <span style="font-size:.82rem;font-weight:600;">Side-by-Side Comparison</span>
+        <span class="text-muted text-sm">Drag divider · click image to fullscreen</span>
+      </div>
+      <div class="compare-wrap" id="compare-wrap">
+        <div class="compare-side" id="cmp-left">
+          <img src="/cache/thumbnails/{{ keep_p.thumbnail_path.split('/')[-1] }}"
+               onclick="openLightbox('/photo/{{ keep_p.id }}/original')"
+               style="cursor:zoom-in;" alt="KEEP">
+          <div class="compare-label" style="background:rgba(22,163,74,.8);">KEEP · {{ keep_p.filename[:20] }}</div>
+        </div>
+        <div class="compare-divider" id="cmp-divider"></div>
+        <div class="compare-side" id="cmp-right">
+          <img src="/cache/thumbnails/{{ trash_p.thumbnail_path.split('/')[-1] }}"
+               onclick="openLightbox('/photo/{{ trash_p.id }}/original')"
+               style="cursor:zoom-in;" alt="TRASH">
+          <div class="compare-label" style="background:rgba(220,38,38,.8);">TRASH · {{ trash_p.filename[:20] }}</div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+{% endif %}
+
 {# ── photo cards ──────────────────────────────────────────────────────── #}
 <div class="detail-grid">
   {% for photo_id in group.member_ids %}
@@ -101,6 +135,13 @@
             <strong style="font-size:.85rem;">{{ p.filename }}</strong>
             <a href="/photo/{{ p.id }}/original" target="_blank"
                class="btn btn-ghost btn-sm ml-auto" title="Open original (O)">⬡ Original</a>
+            {% if p.google_photos_url %}
+              <a href="{{ p.google_photos_url }}" target="_blank" rel="noopener"
+                 class="btn btn-ghost btn-sm" title="Open in Google Photos"
+                 style="color:#4285f4;border-color:#4285f4;">
+                ☁ Google Photos
+              </a>
+            {% endif %}
             {% if not is_keep and group.review_status.value == 'pending' %}
               <button onclick="changeKeeper({{ group.id }}, {{ p.id }}); location.reload();"
                       class="btn btn-ghost btn-sm" title="Make this the keeper">☆ Make Keeper</button>
@@ -148,12 +189,62 @@
               <td>Path</td>
               <td class="font-mono" style="font-size:.68rem; word-break:break-all;">{{ p.path }}</td>
             </tr>
+            {% if p.google_photos_url %}
+            <tr>
+              <td>Google</td>
+              <td><a href="{{ p.google_photos_url }}" target="_blank" rel="noopener"
+                     style="color:#4285f4;font-size:.75rem;">Open in Google Photos ↗</a></td>
+            </tr>
+            {% endif %}
           </table>
         </div>
       </div>
     {% endif %}
   {% endfor %}
 </div>
+
+{% block scripts %}
+<script>
+// ── drag-to-resize side-by-side comparison ────────────────────────────────
+(function () {
+  const wrap     = document.getElementById("compare-wrap");
+  const divider  = document.getElementById("cmp-divider");
+  const left     = document.getElementById("cmp-left");
+  const right    = document.getElementById("cmp-right");
+  if (!wrap || !divider) return;
+
+  let dragging = false;
+
+  divider.addEventListener("mousedown", (e) => {
+    dragging = true;
+    e.preventDefault();
+  });
+  document.addEventListener("mousemove", (e) => {
+    if (!dragging) return;
+    const rect = wrap.getBoundingClientRect();
+    let x = e.clientX - rect.left;
+    x = Math.max(60, Math.min(rect.width - 60, x));
+    const pct = (x / rect.width) * 100;
+    left.style.flex  = `0 0 ${pct}%`;
+    right.style.flex = `0 0 ${100 - pct}%`;
+  });
+  document.addEventListener("mouseup", () => { dragging = false; });
+
+  // touch support
+  divider.addEventListener("touchstart", (e) => { dragging = true; }, {passive: true});
+  document.addEventListener("touchmove", (e) => {
+    if (!dragging) return;
+    const rect = wrap.getBoundingClientRect();
+    let x = e.touches[0].clientX - rect.left;
+    x = Math.max(60, Math.min(rect.width - 60, x));
+    const pct = (x / rect.width) * 100;
+    left.style.flex  = `0 0 ${pct}%`;
+    right.style.flex = `0 0 ${100 - pct}%`;
+  }, {passive: true});
+  document.addEventListener("touchend", () => { dragging = false; });
+})();
+</script>
+{% endblock %}
 
 {# ── bottom navigation ────────────────────────────────────────────────── #}
 <div class="flex gap-2 mt-4">

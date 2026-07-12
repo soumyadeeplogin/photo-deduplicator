@@ -58,6 +58,7 @@ class PhotoRecord:
     thumbnail_path: Optional[str] = None
     review_status: ReviewStatus = ReviewStatus.PENDING
     move_destination: Optional[str] = None
+    google_photos_url: Optional[str] = None
 
     @property
     def megapixels(self) -> Optional[float]:

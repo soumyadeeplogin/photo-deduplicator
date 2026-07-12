@@ -77,6 +77,54 @@ class Mover:
         self.db.update_group_keeper(group_id, new_keeper_id)
         logger.info("Group %d keeper changed to photo %d", group_id, new_keeper_id)
 
+    # ── batch operations ───────────────────────────────────────────────────
+
+    def approve_all_high_confidence(self, min_confidence: float = 0.75) -> tuple[int, int]:
+        """
+        Approve all pending groups with confidence >= min_confidence.
+        Returns (groups_approved, photos_approved).
+        """
+        groups = self.db.get_pending_groups(min_confidence=min_confidence)
+        groups_count = 0
+        photos_count = 0
+        for group in groups:
+            photos_count += self.approve_group(group.id)
+            groups_count += 1
+        logger.info(
+            "Batch approve (≥%.0f%%): %d groups, %d photos",
+            min_confidence * 100, groups_count, photos_count,
+        )
+        return groups_count, photos_count
+
+    def approve_all_by_reason(self, reason: str) -> tuple[int, int]:
+        """
+        Approve all pending groups matching a given reason string.
+        Returns (groups_approved, photos_approved).
+        """
+        groups = self.db.get_pending_groups(reason=reason)
+        groups_count = 0
+        photos_count = 0
+        for group in groups:
+            photos_count += self.approve_group(group.id)
+            groups_count += 1
+        logger.info(
+            "Batch approve reason=%s: %d groups, %d photos",
+            reason, groups_count, photos_count,
+        )
+        return groups_count, photos_count
+
+    def approve_groups_by_ids(self, group_ids: list[int]) -> tuple[int, int]:
+        """Approve a specific list of group IDs. Returns (groups, photos)."""
+        groups_count = 0
+        photos_count = 0
+        for gid in group_ids:
+            try:
+                photos_count += self.approve_group(gid)
+                groups_count += 1
+            except ValueError:
+                pass
+        return groups_count, photos_count
+
     # ── phase 2: move to _permanent_delete ────────────────────────────────
 
     def process_approved(self, progress_cb=None) -> int:

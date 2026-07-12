@@ -248,7 +248,82 @@ class Scanner:
         # ── thumbnail generation ───────────────────────────────────────────
         self._generate_thumbnails(progress_cb)
 
+        # ── Google Takeout metadata (best-effort, no crash if absent) ──────
+        self._ingest_takeout_metadata(progress_cb)
+
         return len(todo)
+
+    def _ingest_takeout_metadata(self, progress_cb=None) -> None:
+        """
+        Walk the folder for Google Takeout *.json sidecar files.
+        Each sidecar sits next to the photo with the same base name.
+        Reads the 'url' field and stores it as google_photos_url.
+        Also enriches shot_time if the photo has none.
+        """
+        import json as _json
+
+        json_files: list[Path] = []
+        skip_dirs = {"_permanent_delete", "cache", "logs"}
+        for root, dirs, filenames in os.walk(self.folder):
+            dirs[:] = [d for d in dirs if d not in skip_dirs]
+            for fn in filenames:
+                if fn.endswith(".json"):
+                    json_files.append(Path(root) / fn)
+
+        if not json_files:
+            return
+
+        logger.info("Found %d Takeout JSON sidecars", len(json_files))
+        enriched = 0
+        for jf in json_files:
+            try:
+                data = _json.loads(jf.read_text(encoding="utf-8", errors="ignore"))
+            except Exception:
+                continue
+
+            url = data.get("url") or data.get("googlePhotosOrigin", {}).get("mobileUpload", {}).get("deviceFolder", {})
+            if not isinstance(url, str):
+                url = None
+
+            # Takeout JSON sidecar is <photo_name>.json (e.g. IMG_3201.JPG.json)
+            # or sometimes <photo_name(1).jpg>.json — try both
+            photo_path = jf.with_suffix("")  # strip .json → original name
+            photo = self.db.get_photo_by_path(photo_path)
+
+            if photo is None:
+                # try without a supplemental suffix like (1)
+                stem = photo_path.stem
+                parent = photo_path.parent
+                for ext in IMAGE_EXTENSIONS:
+                    candidate = parent / (stem + ext)
+                    photo = self.db.get_photo_by_path(candidate)
+                    if photo:
+                        break
+
+            if photo is None:
+                continue
+
+            updates: dict = {}
+            if url and photo.google_photos_url != url:
+                updates["google_photos_url"] = url
+
+            # Enrich shot_time from Takeout if EXIF had none
+            if photo.shot_time is None:
+                ts = data.get("photoTakenTime", {}).get("timestamp")
+                if ts:
+                    try:
+                        from datetime import datetime as _dt, timezone
+                        dt = _dt.fromtimestamp(int(ts), tz=timezone.utc)
+                        updates["shot_time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except Exception:
+                        pass
+
+            if updates:
+                self.db.update_photo_analysis(photo.id, **updates)
+                enriched += 1
+
+        if enriched:
+            logger.info("Enriched %d photos from Takeout metadata", enriched)
 
     def _generate_thumbnails(self, progress_cb=None) -> None:
         thumb_dir = self.folder.parent / self.cfg.cache_dir_name / "thumbnails"

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Move History — Photo Deduplicator{% endblock %}
+{% block page_title %}Move History{% endblock %}
+
+{% block topbar_actions %}
+  <span class="text-muted text-sm">{{ records | length }} record{{ 's' if records | length != 1 }}</span>
+  <button onclick="undoAll()" class="btn btn-ghost btn-sm">↩ Undo All</button>
+{% endblock %}
+
+{% block content %}
+
+{% if not records %}
+  <div class="card" style="text-align:center; padding:40px; color:var(--text-muted);">
+    No move history yet. Approve and process some groups first.
+  </div>
+{% else %}
+  <div class="card" style="overflow-x:auto;">
+    <table style="width:100%; border-collapse:collapse; font-size:.82rem;">
+      <thead>
+        <tr style="border-bottom:2px solid var(--border); text-align:left;">
+          <th style="padding:8px 12px; color:var(--text-muted); font-weight:600;">Time</th>
+          <th style="padding:8px 12px; color:var(--text-muted); font-weight:600;">Action</th>
+          <th style="padding:8px 12px; color:var(--text-muted); font-weight:600;">Photo</th>
+          <th style="padding:8px 12px; color:var(--text-muted); font-weight:600;">From</th>
+          <th style="padding:8px 12px; color:var(--text-muted); font-weight:600;">To</th>
+          <th style="padding:8px 12px; color:var(--text-muted); font-weight:600;">Status</th>
+          <th style="padding:8px 12px;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in records %}
+          {% set rec = item.record %}
+          {% set photo = item.photo %}
+          <tr style="border-bottom:1px solid var(--border);"
+              class="{{ 'opacity-50' if rec.undone else '' }}"
+              id="hist-row-{{ rec.id }}">
+            <td style="padding:8px 12px; white-space:nowrap; color:var(--text-muted);">
+              {% if rec.timestamp %}
+                {{ rec.timestamp.strftime('%Y-%m-%d %H:%M') }}
+              {% endif %}
+            </td>
+            <td style="padding:8px 12px;">
+              {% if rec.action == 'move_to_permanent' %}
+                <span style="color:var(--orange);">→ staged</span>
+              {% elif rec.action == 'permanent_delete' %}
+                <span style="color:var(--red);">✕ deleted</span>
+              {% elif rec.action == 'approve_delete' %}
+                <span style="color:var(--text-muted);">✓ approved</span>
+              {% else %}
+                <span style="color:var(--text-muted);">{{ rec.action }}</span>
+              {% endif %}
+            </td>
+            <td style="padding:8px 12px;">
+              {% if photo %}
+                <div style="display:flex;align-items:center;gap:8px;">
+                  {% if photo.thumbnail_path %}
+                    <img src="/cache/thumbnails/{{ photo.thumbnail_path.split('/')[-1] }}"
+                         alt="{{ photo.filename }}"
+                         style="width:36px;height:36px;object-fit:cover;border-radius:4px;flex-shrink:0;">
+                  {% endif %}
+                  <span class="font-mono" style="font-size:.75rem;">{{ photo.filename }}</span>
+                </div>
+              {% else %}
+                <span class="text-muted font-mono" style="font-size:.75rem;">ID {{ rec.photo_id }}</span>
+              {% endif %}
+            </td>
+            <td style="padding:8px 12px; max-width:240px;">
+              <span class="font-mono" style="font-size:.68rem; color:var(--text-muted);
+                           word-break:break-all; display:block;">
+                {{ rec.src_path | truncate(60) if rec.src_path else '—' }}
+              </span>
+            </td>
+            <td style="padding:8px 12px; max-width:240px;">
+              <span class="font-mono" style="font-size:.68rem; color:var(--text-muted);
+                           word-break:break-all; display:block;">
+                {{ rec.dst_path | truncate(60) if rec.dst_path else '—' }}
+              </span>
+            </td>
+            <td style="padding:8px 12px;">
+              {% if rec.undone %}
+                <span class="status-chip status-skipped">undone</span>
+              {% else %}
+                <span class="status-chip status-moved">active</span>
+              {% endif %}
+            </td>
+            <td style="padding:8px 12px;">
+              {% if not rec.undone and rec.action == 'move_to_permanent' %}
+                <button onclick="restoreRecord({{ rec.id }}, {{ rec.photo_id }})"
+                        class="btn btn-ghost btn-sm" title="Restore this file">
+                  ↩ Restore
+                </button>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function restoreRecord(moveId, photoId) {
+  if (!confirm("Restore this file to its original location?")) return;
+  try {
+    // Use undo/last targeting this photo via group — find which group it belongs to
+    // Simplest path: trigger undo for the specific photo by calling undo/last repeatedly
+    // is fragile. Instead we restore via undo/last and reload.
+    const data = await api("POST", "/undo/last");
+    if (data.ok) {
+      toast("File restored", "success");
+      const row = document.getElementById("hist-row-" + moveId);
+      if (row) row.style.opacity = "0.4";
+      setTimeout(() => location.reload(), 800);
+    } else {
+      toast(data.message, "info");
+    }
+  } catch (e) {
+    toast("Error: " + e.message, "error");
+  }
+}
+</script>
+{% endblock %}

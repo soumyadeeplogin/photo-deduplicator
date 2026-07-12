@@ -251,3 +251,83 @@ function confClass(score) {
   if (score >= 0.5)  return "conf-medium";
   return "conf-low";
 }
+
+// ── batch approve modal ───────────────────────────────────────────────────────
+function openBatchModal() {
+  const m = document.getElementById("batch-modal");
+  if (m) { m.style.display = "flex"; }
+}
+function closeBatchModal() {
+  const m = document.getElementById("batch-modal");
+  if (m) { m.style.display = "none"; }
+}
+
+document.addEventListener("click", (e) => {
+  const m = document.getElementById("batch-modal");
+  if (m && e.target === m) closeBatchModal();
+});
+
+// Keep the label in sync with the slider
+document.addEventListener("DOMContentLoaded", () => {
+  const slider = document.getElementById("batch-conf-slider");
+  if (slider) {
+    slider.addEventListener("input", () => {
+      const lbl = document.getElementById("batch-conf-label");
+      if (lbl) lbl.textContent = slider.value + "%";
+    });
+  }
+});
+
+async function batchApproveConf() {
+  const slider = document.getElementById("batch-conf-slider");
+  const conf = slider ? parseInt(slider.value) / 100 : 0.75;
+  closeBatchModal();
+  if (!confirm(`Approve all pending groups with ≥${Math.round(conf * 100)}% confidence?`)) return;
+  try {
+    const data = await api("POST", "/api/batch/approve", { min_confidence: conf });
+    toast(`Approved ${data.groups_approved} groups (${data.photos_approved} photos)`, "success");
+    updateApprovedCounter();
+    setTimeout(() => location.reload(), 1200);
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
+async function batchApproveReason(reason) {
+  closeBatchModal();
+  const label = reason.replace(/_/g, " ");
+  if (!confirm(`Approve all pending "${label}" groups?`)) return;
+  try {
+    const data = await api("POST", "/api/batch/approve", { reason });
+    toast(`Approved ${data.groups_approved} ${label} groups (${data.photos_approved} photos)`, "success");
+    updateApprovedCounter();
+    setTimeout(() => location.reload(), 1200);
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
+// ── approved space counter ────────────────────────────────────────────────────
+function fmtBytes(b) {
+  if (b === null || b === undefined) return "?";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (b >= 1024 && i < units.length - 1) { b /= 1024; i++; }
+  return b.toFixed(1) + " " + units[i];
+}
+
+async function updateApprovedCounter() {
+  try {
+    const data = await api("GET", "/stats");
+    const el = document.getElementById("approved-size-counter");
+    if (!el) return;
+    const total = data.total_size_bytes || 0;
+    const approved = data.approved_size_bytes || 0;
+    const pct = total > 0 ? Math.round(approved / total * 100) : 0;
+    el.textContent = `${fmtBytes(approved)} approved (${pct}% of album)`;
+    el.style.display = approved > 0 ? "block" : "none";
+  } catch (_) {}
+}
+
+// Run on page load for pages that have the counter
+document.addEventListener("DOMContentLoaded", updateApprovedCounter);

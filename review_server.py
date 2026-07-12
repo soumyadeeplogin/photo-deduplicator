@@ -344,6 +344,41 @@ def create_app(initial_folder: Optional[Path], cfg: Config) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
+    # ── batch approve ──────────────────────────────────────────────────────
+
+    class BatchApproveBody(BaseModel):
+        min_confidence: float = 0.75
+        reason: Optional[str] = None
+        group_ids: Optional[list[int]] = None
+
+    @app.post("/api/batch/approve")
+    async def batch_approve(body: BatchApproveBody):
+        s = _require_state()
+        if body.group_ids is not None:
+            g, p = s.mover.approve_groups_by_ids(body.group_ids)
+        elif body.reason:
+            g, p = s.mover.approve_all_by_reason(body.reason)
+        else:
+            g, p = s.mover.approve_all_high_confidence(body.min_confidence)
+        return {"ok": True, "groups_approved": g, "photos_approved": p}
+
+    # ── history page ───────────────────────────────────────────────────────
+
+    @app.get("/history", response_class=HTMLResponse)
+    async def history_page(request: Request, limit: int = 100):
+        s = _require_state()
+        records = s.db.get_move_history(limit=limit)
+        # Enrich with photo info
+        enriched = []
+        for rec in records:
+            photo = s.db.get_photo(rec.photo_id)
+            enriched.append({"record": rec, "photo": photo})
+        return templates.TemplateResponse(
+            request,
+            "history.html",
+            {"records": enriched, "stats": s.db.get_stats()},
+        )
+
     # ── process & delete ───────────────────────────────────────────────────
 
     @app.post("/process")

@@ -4,6 +4,9 @@
 
 {% block topbar_actions %}
   <span class="text-muted text-sm">{{ total }} group{{ 's' if total != 1 }}</span>
+  <span id="sel-count" class="text-muted text-sm" style="display:none;"></span>
+  <button id="bulk-approve-btn" onclick="bulkApproveSelected()" class="btn btn-danger btn-sm" style="display:none;">✓ Approve Selected</button>
+  <button id="bulk-skip-btn" onclick="bulkSkipSelected()" class="btn btn-ghost btn-sm" style="display:none;">Skip Selected</button>
   <button onclick="processApproved()" class="btn btn-danger btn-sm">▶ Process Approved</button>
   <button onclick="undoLast()" class="btn btn-ghost btn-sm">↩ Undo Last</button>
 {% endblock %}
@@ -48,7 +51,42 @@
   </div>
   <button type="submit" class="btn btn-primary btn-sm" style="align-self:flex-end;">Apply</button>
   <a href="/review" class="btn btn-ghost btn-sm" style="align-self:flex-end;">Reset</a>
+  <div style="align-self:flex-end; margin-left:auto;">
+    <label style="font-size:.78rem;color:var(--text-muted);display:flex;align-items:center;gap:5px;cursor:pointer;">
+      <input type="checkbox" id="select-all-cb" onchange="toggleSelectAll(this.checked)"> Select all on page
+    </label>
+  </div>
 </form>
+
+{# ── review progress banner ───────────────────────────────────────────── #}
+{% set pending   = stats.by_status.get('pending', 0) %}
+{% set approved  = stats.by_status.get('approved_delete', 0) %}
+{% set skipped   = stats.by_status.get('skipped', 0) %}
+{% set moved     = stats.by_status.get('moved', 0) %}
+{% set total_grp = stats.by_status.values() | sum %}
+{% set reviewed  = approved + skipped + moved %}
+{% if total_grp > 0 %}
+  <div class="card mb-3" style="padding:12px 16px;">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      <span style="font-size:.82rem;color:var(--text-muted);">Progress</span>
+      <div style="flex:1;min-width:120px;">
+        <div class="progress-wrap">
+          <div class="progress-bar" style="width:{{ ((reviewed / total_grp) * 100) | int }}%;background:var(--green);"></div>
+        </div>
+      </div>
+      <span style="font-size:.82rem;font-weight:600;">
+        {{ reviewed }} / {{ total_grp }} reviewed
+        ({{ ((reviewed / total_grp) * 100) | int }}%)
+      </span>
+      <span class="text-muted text-sm">· {{ pending }} pending · {{ approved }} approved · {{ skipped }} skipped</span>
+      {% if stats.approved_size_bytes %}
+        <span style="font-size:.78rem;color:var(--green);font-weight:600;">
+          {{ stats.approved_size_bytes | fmt_size }} approved for deletion
+        </span>
+      {% endif %}
+    </div>
+  </div>
+{% endif %}
 
 {# ── group list ───────────────────────────────────────────────────────── #}
 {% if not groups %}
@@ -62,6 +100,8 @@
   {% set photo_map = item.photos %}
   <div class="group-card" data-group-id="{{ g.id }}" data-status="{{ g.review_status.value }}">
     <div class="group-header">
+      <input type="checkbox" class="group-cb" data-id="{{ g.id }}"
+             onchange="updateSelectionUI()" style="width:15px;height:15px;cursor:pointer;flex-shrink:0;">
       <a href="/review/{{ g.id }}">#{{ g.id }}</a>
       <span class="pill pill-{{ g.reason.value }}">{{ reason_labels[g.reason.value] }}</span>
       <span class="status-chip status-{{ g.review_status.value }}">
@@ -153,4 +193,64 @@
   </div>
 {% endif %}
 
+{% endblock %}
+
+{% block scripts %}
+<script>
+function getSelectedIds() {
+  return Array.from(document.querySelectorAll(".group-cb:checked"))
+              .map(cb => parseInt(cb.dataset.id));
+}
+
+function updateSelectionUI() {
+  const ids = getSelectedIds();
+  const countEl = document.getElementById("sel-count");
+  const approveBtn = document.getElementById("bulk-approve-btn");
+  const skipBtn = document.getElementById("bulk-skip-btn");
+  if (ids.length > 0) {
+    countEl.textContent = `${ids.length} selected`;
+    countEl.style.display = "inline";
+    approveBtn.style.display = "inline-flex";
+    skipBtn.style.display = "inline-flex";
+  } else {
+    countEl.style.display = "none";
+    approveBtn.style.display = "none";
+    skipBtn.style.display = "none";
+  }
+  const allCb = document.getElementById("select-all-cb");
+  const total = document.querySelectorAll(".group-cb").length;
+  if (allCb) allCb.indeterminate = ids.length > 0 && ids.length < total;
+}
+
+function toggleSelectAll(checked) {
+  document.querySelectorAll(".group-cb").forEach(cb => { cb.checked = checked; });
+  updateSelectionUI();
+}
+
+async function bulkApproveSelected() {
+  const ids = getSelectedIds();
+  if (!ids.length) return;
+  if (!confirm(`Approve ${ids.length} selected group(s) for deletion?`)) return;
+  try {
+    const data = await api("POST", "/api/batch/approve", { group_ids: ids });
+    toast(`Approved ${data.groups_approved} groups (${data.photos_approved} photos)`, "success");
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
+async function bulkSkipSelected() {
+  const ids = getSelectedIds();
+  if (!ids.length) return;
+  if (!confirm(`Skip ${ids.length} selected group(s)?`)) return;
+  try {
+    await Promise.all(ids.map(id => api("POST", `/review/${id}/skip`)));
+    toast(`Skipped ${ids.length} groups`, "info");
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+</script>
 {% endblock %}

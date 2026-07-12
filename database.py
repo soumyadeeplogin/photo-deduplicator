@@ -48,10 +48,11 @@ CREATE TABLE IF NOT EXISTS photos (
     has_camera_exif  INTEGER NOT NULL DEFAULT 0,
 
     -- state
-    thumbnail_path   TEXT,
-    review_status    TEXT NOT NULL DEFAULT 'pending',
-    move_destination TEXT,
-    created_at       TEXT NOT NULL DEFAULT (datetime('now'))
+    thumbnail_path    TEXT,
+    review_status     TEXT NOT NULL DEFAULT 'pending',
+    move_destination  TEXT,
+    google_photos_url TEXT,
+    created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_photos_md5    ON photos(md5);
@@ -102,7 +103,22 @@ class Database:
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(DDL)
         self._conn.commit()
+        self._migrate()
         logger.debug("Database opened: %s", self._path)
+
+    def _migrate(self) -> None:
+        """Apply any schema additions that CREATE IF NOT EXISTS won't handle."""
+        assert self._conn
+        cols = {
+            row[1]
+            for row in self._conn.execute("PRAGMA table_info(photos)").fetchall()
+        }
+        if "google_photos_url" not in cols:
+            self._conn.execute(
+                "ALTER TABLE photos ADD COLUMN google_photos_url TEXT"
+            )
+            self._conn.commit()
+            logger.debug("Migrated: added google_photos_url column")
 
     def close(self) -> None:
         if self._conn:
@@ -384,13 +400,43 @@ class Database:
             WHERE p.id != dg.keeper_id OR dg.keeper_id IS NULL
             """
         ).fetchone()
+        approved_size = r.execute(
+            """
+            SELECT SUM(p.size_bytes) AS b FROM photos p
+            WHERE p.review_status IN ('approved_delete', 'moved')
+            """
+        ).fetchone()
         return {
             "total_photos": total["n"] or 0,
             "total_size_bytes": total["b"] or 0,
             "flagged_size_bytes": flagged["b"] or 0,
+            "approved_size_bytes": approved_size["b"] or 0,
             "by_reason": {r["reason"]: r["n"] for r in by_reason},
             "by_status": {r["review_status"]: r["n"] for r in by_status},
         }
+
+    # ── batch operations ───────────────────────────────────────────────────
+
+    def get_pending_groups(
+        self,
+        reason: Optional[str] = None,
+        min_confidence: float = 0.0,
+    ) -> list["DuplicateGroup"]:
+        """Return pending groups filtered by reason and/or minimum confidence."""
+        assert self._conn
+        where: list[str] = ["review_status = 'pending'"]
+        params: list[object] = []
+        if reason:
+            where.append("reason = ?")
+            params.append(reason)
+        if min_confidence > 0:
+            where.append("confidence >= ?")
+            params.append(min_confidence)
+        rows = self._conn.execute(
+            f"SELECT * FROM duplicate_groups WHERE {' AND '.join(where)} ORDER BY confidence DESC",
+            params,
+        ).fetchall()
+        return [_row_to_group(r, self._get_member_ids(r["id"])) for r in rows]
 
 
 # ── row converters ──────────────────────────────────────────────────────────
@@ -418,6 +464,7 @@ def _row_to_photo(row: sqlite3.Row) -> PhotoRecord:
         thumbnail_path=row["thumbnail_path"],
         review_status=ReviewStatus(row["review_status"]),
         move_destination=row["move_destination"],
+        google_photos_url=row["google_photos_url"] if "google_photos_url" in row.keys() else None,
     )
 
 
