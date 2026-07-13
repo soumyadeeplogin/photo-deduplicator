@@ -16,9 +16,9 @@ class Config:
     phash_threshold: int = 10       # Hamming distance ≤ this → burst duplicate
 
     # ── quality cull ──────────────────────────────────────────────────────────
-    blur_threshold: float = 80.0    # Laplacian variance below this → blurry
-    brightness_min: float = 20.0    # mean pixel value below this → too dark
-    brightness_max: float = 235.0   # mean pixel value above this → overexposed
+    blur_threshold: float = 80.0       # center-weighted Laplacian variance below this → blurry
+    highlight_threshold: float = 5.0   # % pixels > 250 above this → overexposed
+    shadow_threshold: float = 15.0     # % pixels < 5 above this → too dark
 
     # ── near-duplicate (cross-session) ────────────────────────────────────────
     similar_threshold: int = 8      # stricter than burst; pHash distance
@@ -45,6 +45,14 @@ class Config:
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".jpg", ".jpeg", ".png", ".heic", ".heif",
     ".tiff", ".tif", ".webp", ".bmp",
+    # RAW formats
+    ".nef", ".cr2", ".cr3", ".arw", ".orf", ".raf",
+    ".rw2", ".dng", ".pef", ".srw", ".x3f", ".raw",
+})
+
+RAW_EXTENSIONS: frozenset[str] = frozenset({
+    ".nef", ".cr2", ".cr3", ".arw", ".orf", ".raf",
+    ".rw2", ".dng", ".pef", ".srw", ".x3f", ".raw",
 })
 
 SCREEN_RESOLUTIONS: frozenset[tuple[int, int]] = frozenset({

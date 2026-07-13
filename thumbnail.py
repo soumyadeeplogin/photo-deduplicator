@@ -16,6 +16,31 @@ def thumbnail_filename(photo_path: Path) -> str:
     return f"{key}.jpg"
 
 
+def _open_as_pil(photo_path: Path):
+    """Open any supported image as a PIL Image (RGB). Returns None on failure."""
+    from PIL import Image
+    from config import RAW_EXTENSIONS
+    suffix = photo_path.suffix.lower()
+    if suffix in RAW_EXTENSIONS:
+        try:
+            import rawpy
+            with rawpy.imread(str(photo_path)) as raw:
+                rgb = raw.postprocess(
+                    use_camera_wb=True,
+                    half_size=True,
+                    no_auto_bright=False,
+                    output_bps=8,
+                )
+            return Image.fromarray(rgb).convert("RGB")
+        except Exception:
+            return None
+    else:
+        try:
+            return Image.open(photo_path).convert("RGB")
+        except Exception:
+            return None
+
+
 def generate_thumbnail(
     photo_path: Path,
     thumb_dir: Path,
@@ -30,8 +55,6 @@ def generate_thumbnail(
     that can be served as a static file, or None on failure.
     """
     try:
-        from PIL import Image
-
         thumb_dir.mkdir(parents=True, exist_ok=True)
         fname = thumbnail_filename(photo_path)
         dest = thumb_dir / fname
@@ -39,9 +62,12 @@ def generate_thumbnail(
         if dest.exists() and not force:
             return f"thumbnails/{fname}"
 
-        with Image.open(photo_path) as img:
+        img = _open_as_pil(photo_path)
+        if img is None:
+            return None
+        with img:
             img.thumbnail(size, Image.LANCZOS)
-            img.convert("RGB").save(dest, format="JPEG", quality=quality, optimize=True)
+            img.save(dest, format="JPEG", quality=quality, optimize=True)
 
         return f"thumbnails/{fname}"
     except Exception as exc:

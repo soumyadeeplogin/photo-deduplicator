@@ -61,6 +61,11 @@ logger = logging.getLogger(__name__)
 _scan_progress: dict = {"current": 0, "total": 0, "message": "", "done": True, "error": ""}
 _scan_lock = threading.Lock()
 
+# ── shared export progress ────────────────────────────────────────────────────
+
+_export_progress: dict = {"current": 0, "total": 0, "message": "", "done": True, "error": "", "dest": ""}
+_export_lock = threading.Lock()
+
 
 def _progress_cb(current: int, total: int, message: str) -> None:
     with _scan_lock:
@@ -344,6 +349,14 @@ def create_app(initial_folder: Optional[Path], cfg: Config) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
+    @app.post("/photo/{photo_id}/rate/{stars}")
+    async def rate_photo(photo_id: int, stars: int):
+        s = _require_state()
+        if stars < 0 or stars > 5:
+            raise HTTPException(400, "Rating must be 0-5 (0 clears the rating)")
+        s.db.update_photo_rating(photo_id, stars if stars > 0 else None)
+        return {"ok": True, "photo_id": photo_id, "rating": stars if stars > 0 else None}
+
     # ── batch approve ──────────────────────────────────────────────────────
 
     class BatchApproveBody(BaseModel):
@@ -521,6 +534,135 @@ def create_app(initial_folder: Optional[Path], cfg: Config) -> FastAPI:
                 ],
             })
         return JSONResponse(out)
+
+    # ── RAW → JPEG export ─────────────────────────────────────────────────
+
+    @app.get("/export", response_class=HTMLResponse)
+    async def export_page(request: Request):
+        s = _require_state()
+        suggested = str(s.folder.parent / "Exported_JPEGs")
+        return templates.TemplateResponse(
+            request, "export.html", {"suggested_dest": suggested}
+        )
+
+    class ExportBody(BaseModel):
+        scope: str = "all"      # "all" | "keepers" | "raw"
+        dest: str = ""
+        quality: int = 90
+        preserve_structure: bool = True
+
+    @app.post("/api/export")
+    async def start_export(body: ExportBody):
+        s = _require_state()
+        if not body.dest.strip():
+            raise HTTPException(400, "dest is required")
+        if body.quality < 1 or body.quality > 100:
+            raise HTTPException(400, "quality must be 1-100")
+
+        dest = Path(body.dest.strip()).expanduser().resolve()
+
+        def _run_export():
+            from config import RAW_EXTENSIONS
+            from thumbnail import _open_as_pil
+
+            with _export_lock:
+                _export_progress.update(
+                    current=0, total=0, message="Gathering files…",
+                    done=False, error="", dest=str(dest)
+                )
+
+            try:
+                dest.mkdir(parents=True, exist_ok=True)
+                all_photos = s.db.get_all_photos()
+
+                scope = body.scope
+                if scope == "keepers":
+                    from models import ReviewStatus
+                    photos = [
+                        p for p in all_photos
+                        if p.review_status not in (
+                            ReviewStatus.APPROVED_DELETE,
+                            ReviewStatus.MOVED,
+                            ReviewStatus.DELETED,
+                        )
+                    ]
+                elif scope == "raw":
+                    photos = [
+                        p for p in all_photos
+                        if p.path.suffix.lower() in RAW_EXTENSIONS
+                    ]
+                else:
+                    photos = all_photos
+
+                total = len(photos)
+                with _export_lock:
+                    _export_progress.update(total=total, message=f"Exporting {total} photos…")
+
+                source_root = s.folder
+                done = 0
+                for photo in photos:
+                    try:
+                        if body.preserve_structure:
+                            # Mirror the subfolder structure under dest
+                            try:
+                                rel_dir = photo.path.parent.relative_to(source_root)
+                            except ValueError:
+                                rel_dir = Path()
+                            out_dir = dest / rel_dir
+                        else:
+                            out_dir = dest
+
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        out_name = photo.path.stem + ".jpg"
+                        out_path = out_dir / out_name
+                        # Avoid collisions: append _2, _3, etc.
+                        counter = 1
+                        while out_path.exists():
+                            counter += 1
+                            out_path = out_dir / f"{photo.path.stem}_{counter}.jpg"
+
+                        img = _open_as_pil(photo.path)
+                        if img is not None:
+                            with img:
+                                img.save(str(out_path), format="JPEG",
+                                         quality=body.quality, optimize=True)
+                    except Exception as exc:
+                        logger.warning("Export skipped %s: %s", photo.path, exc)
+
+                    done += 1
+                    with _export_lock:
+                        _export_progress.update(
+                            current=done,
+                            message=f"Exported {done}/{total}: {photo.filename}",
+                        )
+
+                with _export_lock:
+                    _export_progress.update(done=True, message=f"Done — {done} files exported")
+
+            except Exception as exc:
+                logger.exception("Export failed: %s", exc)
+                with _export_lock:
+                    _export_progress.update(done=True, error=str(exc),
+                                            message=f"Export failed: {exc}")
+
+        threading.Thread(target=_run_export, daemon=True).start()
+        return {"ok": True}
+
+    @app.get("/api/export/status")
+    async def export_status_sse():
+        def event_stream():
+            while True:
+                with _export_lock:
+                    data = dict(_export_progress)
+                yield f"data: {json.dumps(data)}\n\n"
+                if data.get("done"):
+                    break
+                time.sleep(0.5)
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache"},
+        )
 
     # ── initial scan if folder provided at startup ─────────────────────────
 

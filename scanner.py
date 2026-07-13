@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from config import IMAGE_EXTENSIONS, SCREEN_RESOLUTIONS, Config
+from config import IMAGE_EXTENSIONS, RAW_EXTENSIONS, SCREEN_RESOLUTIONS, Config
 from database import Database
 from thumbnail import generate_thumbnail_worker
 
@@ -25,6 +25,60 @@ logger = logging.getLogger(__name__)
 
 
 # ── top-level worker functions (must be picklable) ───────────────────────────
+
+def _load_image_array(path: Path):
+    """
+    Load an image as an BGR numpy array for OpenCV.
+    Handles both standard formats (via cv2) and RAW files (via rawpy).
+    Returns None on failure.
+    """
+    import cv2
+    suffix = path.suffix.lower()
+    if suffix in RAW_EXTENSIONS:
+        try:
+            import rawpy
+            import numpy as np
+            with rawpy.imread(str(path)) as raw:
+                rgb = raw.postprocess(
+                    use_camera_wb=True,
+                    half_size=False,
+                    no_auto_bright=False,
+                    output_bps=8,
+                )
+            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+        except Exception:
+            return None
+    else:
+        return cv2.imread(str(path))
+
+
+def _load_pil_image(path: Path):
+    """
+    Load a PIL Image. For RAW files uses rawpy → numpy → PIL.
+    Returns None on failure.
+    """
+    from PIL import Image
+    suffix = path.suffix.lower()
+    if suffix in RAW_EXTENSIONS:
+        try:
+            import rawpy
+            import numpy as np
+            with rawpy.imread(str(path)) as raw:
+                rgb = raw.postprocess(
+                    use_camera_wb=True,
+                    half_size=True,   # half-res is fine for pHash
+                    no_auto_bright=False,
+                    output_bps=8,
+                )
+            return Image.fromarray(rgb)
+        except Exception:
+            return None
+    else:
+        try:
+            return Image.open(path)
+        except Exception:
+            return None
+
 
 def _analyse_photo(args: tuple) -> dict:
     """
@@ -39,9 +93,8 @@ def _analyse_photo(args: tuple) -> dict:
 
     try:
         import cv2
-        import exifread
         import imagehash
-        from PIL import Image
+        import numpy as np
 
         # ── MD5 ──────────────────────────────────────────────────────────────
         h = hashlib.md5()
@@ -51,21 +104,40 @@ def _analyse_photo(args: tuple) -> dict:
         result["md5"] = h.hexdigest()
 
         # ── pHash ─────────────────────────────────────────────────────────────
-        try:
-            with Image.open(path) as img:
-                result["phash"] = str(imagehash.phash(img))
-        except Exception:
+        pil_img = _load_pil_image(path)
+        if pil_img is not None:
+            try:
+                result["phash"] = str(imagehash.phash(pil_img))
+            except Exception:
+                result["phash"] = None
+            finally:
+                pil_img.close()
+        else:
             result["phash"] = None
 
-        # ── OpenCV sharpness + brightness ─────────────────────────────────────
-        img_cv = cv2.imread(str(path))
+        # ── OpenCV: center-weighted sharpness + histogram exposure ────────────
+        img_cv = _load_image_array(path)
         if img_cv is not None:
             gray = cv2.cvtColor(img_cv, cv2.COLOR_BGR2GRAY)
-            result["sharpness"] = float(cv2.Laplacian(gray, cv2.CV_64F).var())
-            result["brightness"] = float(gray.mean())
+            h_px, w_px = gray.shape
+
+            # Center-weighted sharpness: score on the central 55% crop
+            margin_y = int(h_px * 0.225)
+            margin_x = int(w_px * 0.225)
+            center_crop = gray[margin_y: h_px - margin_y, margin_x: w_px - margin_x]
+            if center_crop.size > 0:
+                result["sharpness"] = float(cv2.Laplacian(center_crop, cv2.CV_64F).var())
+            else:
+                result["sharpness"] = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+            # Histogram-based exposure: % clipped highlights and crushed shadows
+            total_pixels = float(gray.size)
+            result["highlight_clipping"] = float(np.sum(gray > 250) / total_pixels * 100)
+            result["shadow_clipping"]    = float(np.sum(gray < 5)   / total_pixels * 100)
         else:
             result["sharpness"] = None
-            result["brightness"] = None
+            result["highlight_clipping"] = None
+            result["shadow_clipping"] = None
 
         # ── EXIF ──────────────────────────────────────────────────────────────
         exif = _read_exif(path)
@@ -85,13 +157,18 @@ def _read_exif(path: Path) -> dict:
         "camera_make": None, "camera_model": None,
         "gps_lat": None, "gps_lon": None,
         "has_camera_exif": 0,
+        "exposure_time": None,
+        "f_number": None,
+        "iso": None,
+        "lens_model": None,
+        "shutter_count": None,
     }
     try:
         import exifread
         from PIL import Image
 
         with open(path, "rb") as f:
-            tags = exifread.process_file(f, details=False)
+            tags = exifread.process_file(f, details=True)
 
         out["has_camera_exif"] = int(
             bool(tags.get("Image Make") or tags.get("Image Model"))
@@ -124,14 +201,14 @@ def _read_exif(path: Path) -> dict:
                 try:
                     dt = datetime.strptime(f"{dt_str}.{subsec}", "%Y:%m:%d %H:%M:%S.%f")
                     out["shot_time"] = dt.strftime("%Y-%m-%d %H:%M:%S.%f")
-                    return out
                 except ValueError:
                     pass
-            try:
-                dt = datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
-                out["shot_time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
-            except ValueError:
-                pass
+            if out["shot_time"] is None:
+                try:
+                    dt = datetime.strptime(dt_str, "%Y:%m:%d %H:%M:%S")
+                    out["shot_time"] = dt.strftime("%Y-%m-%d %H:%M:%S")
+                except ValueError:
+                    pass
 
         # GPS
         def _gps_dms(tag) -> Optional[float]:
@@ -155,10 +232,84 @@ def _read_exif(path: Path) -> dict:
         if lon is not None:
             out["gps_lon"] = lon if "E" in lon_ref else -lon
 
+        # Shutter speed — store as human-readable fraction string
+        et_tag = tags.get("EXIF ExposureTime")
+        if et_tag:
+            try:
+                v = et_tag.values[0]
+                num, den = int(v.num), int(v.den)
+                if den == 1:
+                    out["exposure_time"] = f"{num}s"
+                else:
+                    # Simplify: e.g. 1/1000
+                    from math import gcd
+                    g = gcd(num, den)
+                    out["exposure_time"] = f"{num // g}/{den // g}s"
+            except Exception:
+                out["exposure_time"] = str(et_tag)
+
+        # Aperture
+        fn_tag = tags.get("EXIF FNumber")
+        if fn_tag:
+            try:
+                v = fn_tag.values[0]
+                out["f_number"] = round(float(v.num) / float(v.den), 1)
+            except Exception:
+                pass
+
+        # ISO
+        iso_tag = tags.get("EXIF ISOSpeedRatings")
+        if iso_tag:
+            try:
+                out["iso"] = int(str(iso_tag))
+            except Exception:
+                pass
+
+        # Lens model (try multiple tag names)
+        for lens_key in ("EXIF LensModel", "MakerNote LensModel", "Exif.Photo.LensModel"):
+            if tags.get(lens_key):
+                out["lens_model"] = str(tags[lens_key]).strip()
+                break
+
+        # Shutter count — camera-specific MakerNote fields (best-effort)
+        out["shutter_count"] = _read_shutter_count(tags)
+
     except Exception as exc:
         logger.debug("EXIF read failed %s: %s", path, exc)
 
     return out
+
+
+def _read_shutter_count(tags: dict) -> Optional[int]:
+    """
+    Extract shutter actuation count from MakerNote tags.
+    Each camera brand stores it differently; returns None if unavailable.
+    """
+    # Nikon
+    for key in ("MakerNote ShutterCount", "Makernote.Nikon.ShutterCount"):
+        if tags.get(key):
+            try:
+                return int(str(tags[key]))
+            except Exception:
+                pass
+
+    # Canon — Image Number in MakerNote (approximate shutter count)
+    for key in ("MakerNote ImageNumber", "MakerNote CanonFileInfo FileNumber"):
+        if tags.get(key):
+            try:
+                return int(str(tags[key]))
+            except Exception:
+                pass
+
+    # Sony / generic
+    for key in ("MakerNote SonyShutterCount", "MakerNote ShutterActuations"):
+        if tags.get(key):
+            try:
+                return int(str(tags[key]))
+            except Exception:
+                pass
+
+    return None
 
 
 def _discover_files(folder: Path) -> list[Path]:

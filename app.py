@@ -44,8 +44,8 @@ def _build_config(args: argparse.Namespace) -> Config:
         burst_window_sec=args.burst_window,
         phash_threshold=args.phash_threshold,
         blur_threshold=args.blur_threshold,
-        brightness_min=args.brightness_min,
-        brightness_max=args.brightness_max,
+        highlight_threshold=args.highlight_threshold,
+        shadow_threshold=args.shadow_threshold,
         similar_threshold=args.similar_threshold,
         host=args.host,
         port=args.port,
@@ -166,9 +166,11 @@ def main() -> None:
     p.add_argument("--passes", default="exact,burst,blur,screenshot,similar")
     p.add_argument("--burst-window",      type=float, default=3.0,   metavar="SEC")
     p.add_argument("--phash-threshold",   type=int,   default=10,    metavar="N")
-    p.add_argument("--blur-threshold",    type=float, default=80.0,  metavar="N")
-    p.add_argument("--brightness-min",    type=float, default=20.0,  metavar="N")
-    p.add_argument("--brightness-max",    type=float, default=235.0, metavar="N")
+    p.add_argument("--blur-threshold",      type=float, default=80.0, metavar="N")
+    p.add_argument("--highlight-threshold", type=float, default=5.0,  metavar="N",
+                   help="%%pixels>250 above this → overexposed (default 5.0)")
+    p.add_argument("--shadow-threshold",    type=float, default=15.0, metavar="N",
+                   help="%%pixels<5 above this → too dark (default 15.0)")
     p.add_argument("--similar-threshold", type=int,   default=8,     metavar="N")
     p.add_argument("--host",       default="127.0.0.1")
     p.add_argument("--port",       type=int, default=8080)

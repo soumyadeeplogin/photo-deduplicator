@@ -148,6 +148,21 @@
             {% endif %}
           </div>
 
+          {# ── star rating widget ──────────────────────────────────────── #}
+          <div class="star-rating" data-photo-id="{{ p.id }}" style="margin-bottom:10px;">
+            {% for s in range(1, 6) %}
+              <span class="star {% if p.rating and p.rating >= s %}star-on{% endif %}"
+                    data-star="{{ s }}"
+                    onclick="setRating({{ p.id }}, {{ s }})"
+                    title="{{ s }} star{{ 's' if s > 1 }}">★</span>
+            {% endfor %}
+            {% if p.rating %}
+              <span class="text-muted text-sm" style="margin-left:4px;">{{ p.rating }}★</span>
+            {% endif %}
+            <button onclick="setRating({{ p.id }}, 0)" class="btn btn-ghost btn-sm"
+                    style="padding:1px 6px;font-size:.7rem;" title="Clear rating">✕</button>
+          </div>
+
           <table>
             <tr><td>Size</td><td>{{ p.size_bytes | fmt_size }}</td></tr>
             <tr><td>Resolution</td><td>{{ p.resolution_str }}</td></tr>
@@ -157,12 +172,29 @@
                 <td>Sharpness</td>
                 <td>
                   {{ p.sharpness | round(1) }}
-                  <span class="text-muted text-sm">(Laplacian)</span>
+                  <span class="text-muted text-sm">(center-weighted)</span>
                 </td>
               </tr>
             {% endif %}
-            {% if p.brightness is not none %}
-              <tr><td>Brightness</td><td>{{ p.brightness | round(1) }} / 255</td></tr>
+            {% if p.highlight_clipping is not none %}
+              <tr>
+                <td>Highlights</td>
+                <td>
+                  <span style="color:{% if p.highlight_clipping > 5 %}var(--red){% else %}inherit{% endif %};">
+                    {{ p.highlight_clipping | round(1) }}% clipped
+                  </span>
+                </td>
+              </tr>
+            {% endif %}
+            {% if p.shadow_clipping is not none %}
+              <tr>
+                <td>Shadows</td>
+                <td>
+                  <span style="color:{% if p.shadow_clipping > 15 %}var(--red){% else %}inherit{% endif %};">
+                    {{ p.shadow_clipping | round(1) }}% crushed
+                  </span>
+                </td>
+              </tr>
             {% endif %}
             {% if p.shot_time %}
               <tr><td>Taken</td><td>{{ p.shot_time.strftime('%Y-%m-%d %H:%M:%S') }}</td></tr>
@@ -172,6 +204,21 @@
                 <td>Camera</td>
                 <td>{{ [p.camera_make, p.camera_model] | select | join(' ') }}</td>
               </tr>
+            {% endif %}
+            {% if p.exposure_time %}
+              <tr><td>Shutter</td><td>{{ p.exposure_time }}</td></tr>
+            {% endif %}
+            {% if p.f_number %}
+              <tr><td>Aperture</td><td>f/{{ p.f_number }}</td></tr>
+            {% endif %}
+            {% if p.iso %}
+              <tr><td>ISO</td><td>{{ p.iso }}</td></tr>
+            {% endif %}
+            {% if p.lens_model %}
+              <tr><td>Lens</td><td>{{ p.lens_model }}</td></tr>
+            {% endif %}
+            {% if p.shutter_count %}
+              <tr><td>Shutter count</td><td>{{ "{:,}".format(p.shutter_count) }}</td></tr>
             {% endif %}
             {% if p.gps_lat and p.gps_lon %}
               <tr>
@@ -205,6 +252,25 @@
 
 {% block scripts %}
 <script>
+// ── star rating ───────────────────────────────────────────────────────────
+async function setRating(photoId, stars) {
+  try {
+    await api("POST", `/photo/${photoId}/rate/${stars}`);
+    // Update star display in-place
+    const widget = document.querySelector(`.star-rating[data-photo-id="${photoId}"]`);
+    if (widget) {
+      widget.querySelectorAll(".star").forEach((el, i) => {
+        el.classList.toggle("star-on", stars > 0 && i < stars);
+      });
+      const label = widget.querySelector(".text-muted");
+      if (label) label.textContent = stars > 0 ? `${stars}★` : "";
+    }
+    toast(stars > 0 ? `Rated ${stars} star${stars > 1 ? "s" : ""}` : "Rating cleared", "success");
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
 // ── drag-to-resize side-by-side comparison ────────────────────────────────
 (function () {
   const wrap     = document.getElementById("compare-wrap");

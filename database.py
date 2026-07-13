@@ -32,12 +32,13 @@ CREATE TABLE IF NOT EXISTS photos (
     mtime            REAL    NOT NULL,
 
     -- computed (nullable until analysed)
-    md5              TEXT,
-    phash            TEXT,
-    sharpness        REAL,
-    brightness       REAL,
+    md5                TEXT,
+    phash              TEXT,
+    sharpness          REAL,
+    highlight_clipping REAL,
+    shadow_clipping    REAL,
 
-    -- EXIF
+    -- EXIF basic
     width            INTEGER,
     height           INTEGER,
     shot_time        TEXT,
@@ -47,11 +48,19 @@ CREATE TABLE IF NOT EXISTS photos (
     gps_lon          REAL,
     has_camera_exif  INTEGER NOT NULL DEFAULT 0,
 
+    -- EXIF extended
+    exposure_time    TEXT,
+    f_number         REAL,
+    iso              INTEGER,
+    lens_model       TEXT,
+    shutter_count    INTEGER,
+
     -- state
     thumbnail_path    TEXT,
     review_status     TEXT NOT NULL DEFAULT 'pending',
     move_destination  TEXT,
     google_photos_url TEXT,
+    rating            INTEGER,
     created_at        TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -113,12 +122,22 @@ class Database:
             row[1]
             for row in self._conn.execute("PRAGMA table_info(photos)").fetchall()
         }
-        if "google_photos_url" not in cols:
-            self._conn.execute(
-                "ALTER TABLE photos ADD COLUMN google_photos_url TEXT"
-            )
-            self._conn.commit()
-            logger.debug("Migrated: added google_photos_url column")
+        new_cols = [
+            ("google_photos_url",  "TEXT"),
+            ("highlight_clipping", "REAL"),
+            ("shadow_clipping",    "REAL"),
+            ("exposure_time",      "TEXT"),
+            ("f_number",           "REAL"),
+            ("iso",                "INTEGER"),
+            ("lens_model",         "TEXT"),
+            ("shutter_count",      "INTEGER"),
+            ("rating",             "INTEGER"),
+        ]
+        for col, col_type in new_cols:
+            if col not in cols:
+                self._conn.execute(f"ALTER TABLE photos ADD COLUMN {col} {col_type}")
+                logger.debug("Migrated: added %s column", col)
+        self._conn.commit()
 
     def close(self) -> None:
         if self._conn:
@@ -196,6 +215,13 @@ class Database:
             if row is None or row["size_bytes"] != size or abs(row["mtime"] - mtime) > 0.01:
                 stale.append(path)
         return stale
+
+    def update_photo_rating(self, photo_id: int, rating: Optional[int]) -> None:
+        with self.tx() as c:
+            c.execute(
+                "UPDATE photos SET rating = ? WHERE id = ?",
+                (rating, photo_id),
+            )
 
     def get_photos_missing_analysis(self) -> list[PhotoRecord]:
         """Photos already in the DB but lacking MD5/pHash/sharpness."""
@@ -442,6 +468,9 @@ class Database:
 # ── row converters ──────────────────────────────────────────────────────────
 
 def _row_to_photo(row: sqlite3.Row) -> PhotoRecord:
+    keys = row.keys()
+    def _get(col, default=None):
+        return row[col] if col in keys else default
     return PhotoRecord(
         id=row["id"],
         path=Path(row["path"]),
@@ -452,7 +481,8 @@ def _row_to_photo(row: sqlite3.Row) -> PhotoRecord:
         md5=row["md5"],
         phash=row["phash"],
         sharpness=row["sharpness"],
-        brightness=row["brightness"],
+        highlight_clipping=_get("highlight_clipping"),
+        shadow_clipping=_get("shadow_clipping"),
         width=row["width"],
         height=row["height"],
         shot_time=_parse_dt(row["shot_time"]),
@@ -461,10 +491,16 @@ def _row_to_photo(row: sqlite3.Row) -> PhotoRecord:
         gps_lat=row["gps_lat"],
         gps_lon=row["gps_lon"],
         has_camera_exif=bool(row["has_camera_exif"]),
+        exposure_time=_get("exposure_time"),
+        f_number=_get("f_number"),
+        iso=_get("iso"),
+        lens_model=_get("lens_model"),
+        shutter_count=_get("shutter_count"),
         thumbnail_path=row["thumbnail_path"],
         review_status=ReviewStatus(row["review_status"]),
         move_destination=row["move_destination"],
-        google_photos_url=row["google_photos_url"] if "google_photos_url" in row.keys() else None,
+        google_photos_url=_get("google_photos_url"),
+        rating=_get("rating"),
     )
 
 

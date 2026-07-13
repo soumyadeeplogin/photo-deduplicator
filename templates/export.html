@@ -1,0 +1,203 @@
+{% extends "base.html" %}
+{% block title %}Export as JPEG — Photo Deduplicator{% endblock %}
+{% block page_title %}Export as JPEG{% endblock %}
+
+{% block content %}
+<div class="card" style="max-width:640px; padding:24px 28px;">
+  <p style="color:var(--text-muted); margin-bottom:20px; font-size:.88rem;">
+    Convert RAW (and any other supported format) to JPEG. Originals are never touched.
+  </p>
+
+  {# ── Export scope ── #}
+  <div class="filter-group" style="margin-bottom:16px;">
+    <label style="font-weight:600;">Export scope</label>
+    <select id="exp-scope" style="width:100%; margin-top:4px;">
+      <option value="all">All photos in folder (and subfolders)</option>
+      <option value="keepers">Keepers only (not flagged for deletion)</option>
+      <option value="raw">RAW files only</option>
+    </select>
+  </div>
+
+  {# ── Output folder with browse ── #}
+  <div class="filter-group" style="margin-bottom:8px;">
+    <label style="font-weight:600;">Output folder</label>
+    <div style="display:flex; gap:8px; margin-top:4px;">
+      <input type="text" id="exp-dest"
+             placeholder="e.g. /Users/you/Exported_JPEGs"
+             style="flex:1; background:var(--surface2); border:1px solid var(--border);
+                    border-radius:6px; color:var(--text); padding:9px 12px;
+                    font-size:.88rem; font-family:monospace; outline:none;"
+             value="{{ suggested_dest }}">
+      <button onclick="toggleExpBrowser()" class="btn btn-ghost" id="exp-browse-btn"
+              title="Browse folders">📁 Browse</button>
+    </div>
+    <span class="text-muted text-sm">Folder will be created if it doesn't exist.</span>
+  </div>
+
+  {# ── Folder browser widget ── #}
+  <div class="browser-box" id="exp-browser-box" style="margin-bottom:16px;">
+    <div class="browser-header">
+      <button onclick="expBrowserUp()" class="btn btn-ghost btn-sm btn-icon"
+              id="exp-browser-up" title="Parent folder">↑</button>
+      <span class="browser-crumb" id="exp-browser-crumb">…</span>
+      <button onclick="selectExpFolder()" class="btn btn-primary btn-sm"
+              style="margin-left:auto;">Select</button>
+    </div>
+    <div id="exp-browser-list"></div>
+  </div>
+
+  {# ── Folder structure toggle ── #}
+  <div style="margin-bottom:16px;">
+    <label style="display:flex; align-items:center; gap:10px; cursor:pointer; font-size:.88rem;">
+      <input type="checkbox" id="exp-preserve" checked style="width:16px; height:16px; cursor:pointer;">
+      <span>
+        <strong>Preserve folder structure</strong>
+        <span class="text-muted" style="font-size:.8rem; display:block; margin-top:1px;">
+          Subfolders are mirrored inside the output folder
+          (e.g. <code style="font-size:.75rem;">Safari/DSC_0001.jpg</code>)
+        </span>
+      </span>
+    </label>
+  </div>
+
+  {# ── Quality slider ── #}
+  <div class="filter-group" style="margin-bottom:24px;">
+    <label style="font-weight:600;">JPEG quality: <span id="exp-quality-val">90</span>%</label>
+    <input type="range" id="exp-quality" min="60" max="100" value="90"
+           oninput="document.getElementById('exp-quality-val').textContent=this.value"
+           style="width:100%; margin-top:6px;">
+    <div style="display:flex; justify-content:space-between; font-size:.72rem; color:var(--text-muted);">
+      <span>60 — smaller files</span><span>100 — maximum quality</span>
+    </div>
+  </div>
+
+  <button onclick="startExport()" class="btn btn-primary" id="exp-btn" style="width:100%;">
+    ▶ Start Export
+  </button>
+</div>
+
+{# ── Progress card ── #}
+<div id="exp-progress-card" class="card"
+     style="max-width:640px; padding:24px 28px; display:none; margin-top:16px;">
+  <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
+    <span style="font-weight:600;" id="exp-status-label">Exporting…</span>
+    <span id="exp-count" class="text-muted text-sm"></span>
+  </div>
+  <div class="progress-wrap" style="margin-bottom:10px;">
+    <div class="progress-bar" id="exp-progress-bar"
+         style="width:0%; background:var(--green);"></div>
+  </div>
+  <div id="exp-message" class="text-muted text-sm"></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── inline folder browser for export dest ────────────────────────────────────
+let _expBrowserOpen = false;
+let _expBrowserCurrentPath = "";
+
+function toggleExpBrowser() {
+  _expBrowserOpen = !_expBrowserOpen;
+  document.getElementById("exp-browser-box").classList.toggle("open", _expBrowserOpen);
+  if (_expBrowserOpen) {
+    const cur = document.getElementById("exp-dest").value.trim();
+    loadExpBrowser(cur || "");
+  }
+}
+
+async function loadExpBrowser(path) {
+  const listEl = document.getElementById("exp-browser-list");
+  const crumb  = document.getElementById("exp-browser-crumb");
+  const upBtn  = document.getElementById("exp-browser-up");
+
+  listEl.innerHTML = '<div class="browser-empty">Loading…</div>';
+  try {
+    const res  = await fetch("/api/browse?path=" + encodeURIComponent(path));
+    const data = await res.json();
+    _expBrowserCurrentPath = data.path || "";
+    crumb.textContent = data.path || "Select a drive";
+    upBtn.disabled    = !data.parent;
+    upBtn.dataset.parent = data.parent || "";
+
+    if (!data.dirs.length) {
+      listEl.innerHTML = '<div class="browser-empty">No sub-folders here</div>';
+    } else {
+      listEl.innerHTML = data.dirs.map(d =>
+        `<div class="browser-item"
+              onclick="loadExpBrowser(${JSON.stringify(d.path)})">
+           <span class="icon">📁</span><span>${d.name}</span>
+         </div>`
+      ).join("");
+    }
+  } catch(e) {
+    listEl.innerHTML = '<div class="browser-empty">Error loading folders</div>';
+  }
+}
+
+function expBrowserUp() {
+  const parent = document.getElementById("exp-browser-up").dataset.parent;
+  if (parent) loadExpBrowser(parent);
+}
+
+function selectExpFolder() {
+  if (_expBrowserCurrentPath) {
+    document.getElementById("exp-dest").value = _expBrowserCurrentPath;
+  }
+  _expBrowserOpen = false;
+  document.getElementById("exp-browser-box").classList.remove("open");
+}
+
+// ── export ────────────────────────────────────────────────────────────────────
+async function startExport() {
+  const scope             = document.getElementById("exp-scope").value;
+  const dest              = document.getElementById("exp-dest").value.trim();
+  const quality           = parseInt(document.getElementById("exp-quality").value);
+  const preserve_structure = document.getElementById("exp-preserve").checked;
+
+  if (!dest) { toast("Please enter an output folder.", "error"); return; }
+
+  document.getElementById("exp-btn").disabled = true;
+  document.getElementById("exp-progress-card").style.display = "block";
+  document.getElementById("exp-status-label").textContent = "Starting…";
+  document.getElementById("exp-progress-bar").style.width = "0%";
+  document.getElementById("exp-message").textContent = "";
+
+  try {
+    await api("POST", "/api/export", { scope, dest, quality, preserve_structure });
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+    document.getElementById("exp-btn").disabled = false;
+    return;
+  }
+
+  const es = new EventSource("/api/export/status");
+  es.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    const pct = data.total > 0 ? Math.round(data.current / data.total * 100) : 0;
+    document.getElementById("exp-progress-bar").style.width = pct + "%";
+    document.getElementById("exp-count").textContent =
+      data.total > 0 ? `${data.current} / ${data.total}` : "";
+    document.getElementById("exp-message").textContent = data.message || "";
+
+    if (data.done) {
+      es.close();
+      document.getElementById("exp-btn").disabled = false;
+      document.getElementById("exp-status-label").textContent =
+        data.error ? "Export failed" : "Export complete ✓";
+      if (data.error) {
+        toast(`Export error: ${data.error}`, "error");
+      } else {
+        toast(`Exported ${data.current} photo(s) to ${data.dest}`, "success", 6000);
+      }
+    }
+  };
+  es.onerror = () => {
+    es.close();
+    document.getElementById("exp-btn").disabled = false;
+    toast("Export stream error — check console.", "error");
+  };
+}
+</script>
+{% endblock %}

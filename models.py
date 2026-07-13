@@ -41,10 +41,11 @@ class PhotoRecord:
     # computed
     md5: Optional[str] = None
     phash: Optional[str] = None
-    sharpness: Optional[float] = None
-    brightness: Optional[float] = None
+    sharpness: Optional[float] = None          # center-weighted Laplacian variance
+    highlight_clipping: Optional[float] = None  # % pixels > 250
+    shadow_clipping: Optional[float] = None     # % pixels < 5
 
-    # EXIF
+    # EXIF — basic
     width: Optional[int] = None
     height: Optional[int] = None
     shot_time: Optional[datetime] = None
@@ -54,11 +55,19 @@ class PhotoRecord:
     gps_lon: Optional[float] = None
     has_camera_exif: bool = False
 
+    # EXIF — extended
+    exposure_time: Optional[str] = None   # stored as fraction string e.g. "1/1000"
+    f_number: Optional[float] = None
+    iso: Optional[int] = None
+    lens_model: Optional[str] = None
+    shutter_count: Optional[int] = None
+
     # state
     thumbnail_path: Optional[str] = None
     review_status: ReviewStatus = ReviewStatus.PENDING
     move_destination: Optional[str] = None
     google_photos_url: Optional[str] = None
+    rating: Optional[int] = None              # 1–5 stars, user-assigned
 
     @property
     def megapixels(self) -> Optional[float]:

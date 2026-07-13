@@ -70,6 +70,19 @@ class BKTree:
         return results
 
 
+# ── keeper selection ─────────────────────────────────────────────────────────
+
+def _pick_keeper(photos: list[PhotoRecord]) -> PhotoRecord:
+    """
+    Pick the best photo to keep from a group.
+    Priority: highest user rating > highest center-weighted sharpness.
+    """
+    rated = [p for p in photos if p.rating is not None]
+    if rated:
+        return max(rated, key=lambda x: (x.rating or 0, x.sharpness or 0))
+    return max(photos, key=lambda x: x.sharpness or 0)
+
+
 # ── confidence scoring ────────────────────────────────────────────────────────
 
 def _confidence_burst(
@@ -202,8 +215,7 @@ def pass_burst_shots(
         if not similar:
             continue
 
-        by_sharpness = sorted(cluster, key=lambda x: x.sharpness or 0, reverse=True)
-        keeper = by_sharpness[0]
+        keeper = _pick_keeper(cluster)
         ts = keeper.shot_time.strftime("%H:%M:%S") if keeper.shot_time else "unknown"
         conf = _confidence_burst(cluster, distances)
         notes = (
@@ -226,24 +238,31 @@ def pass_burst_shots(
 def pass_quality_cull(
     photos: list[PhotoRecord],
     blur_threshold: float,
-    brightness_min: float,
-    brightness_max: float,
+    highlight_threshold: float,
+    shadow_threshold: float,
 ) -> list[tuple[DuplicateReason, str, float, Optional[int], list[int]]]:
+    """
+    Quality cull using center-weighted sharpness and histogram-based exposure.
+
+    Overexposed: > highlight_threshold % of pixels are blown (>250)
+    Too dark:    > shadow_threshold % of pixels are crushed (<5)
+    Blurry:      center-weighted Laplacian variance < blur_threshold
+    """
     logger.info("[Pass 3] Quality cull (%d photos)", len(photos))
     results = []
     for p in photos:
         if p.sharpness is not None and p.sharpness < blur_threshold:
             conf = _confidence_quality(p.sharpness, blur_threshold, "low")
-            notes = f"Laplacian variance={p.sharpness:.1f} (threshold {blur_threshold})"
+            notes = f"Center sharpness={p.sharpness:.1f} (threshold {blur_threshold})"
             results.append((DuplicateReason.BLURRY, notes, conf, None, [p.id]))
-        elif p.brightness is not None and p.brightness < brightness_min:
-            conf = _confidence_quality(p.brightness, brightness_min, "low")
-            notes = f"Mean brightness={p.brightness:.1f} (min {brightness_min})"
-            results.append((DuplicateReason.DARK, notes, conf, None, [p.id]))
-        elif p.brightness is not None and p.brightness > brightness_max:
-            conf = _confidence_quality(p.brightness, brightness_max, "high")
-            notes = f"Mean brightness={p.brightness:.1f} (max {brightness_max})"
+        elif p.highlight_clipping is not None and p.highlight_clipping > highlight_threshold:
+            conf = round(min(1.0, 0.5 + (p.highlight_clipping - highlight_threshold) / 20), 3)
+            notes = f"Highlights clipped: {p.highlight_clipping:.1f}% pixels > 250 (threshold {highlight_threshold}%)"
             results.append((DuplicateReason.OVEREXPOSED, notes, conf, None, [p.id]))
+        elif p.shadow_clipping is not None and p.shadow_clipping > shadow_threshold:
+            conf = round(min(1.0, 0.5 + (p.shadow_clipping - shadow_threshold) / 20), 3)
+            notes = f"Shadows crushed: {p.shadow_clipping:.1f}% pixels < 5 (threshold {shadow_threshold}%)"
+            results.append((DuplicateReason.DARK, notes, conf, None, [p.id]))
 
     logger.info("  Flagged %d low-quality photos", len(results))
     return results
@@ -332,8 +351,7 @@ def pass_near_duplicates(
         distances = [cp[1] for cp in cluster_pairs]
         assigned.update(c.id for c in cluster)
 
-        by_sharp = sorted(cluster, key=lambda x: x.sharpness or 0, reverse=True)
-        keeper = by_sharp[0]
+        keeper = _pick_keeper(cluster)
         avg_d = sum(distances) / len(distances) if distances else phash_threshold
         conf = _confidence_similar(int(avg_d), phash_threshold)
         notes = f"pHash distance ≤ {phash_threshold}, taken at different times"
@@ -399,8 +417,8 @@ class DuplicateEngine:
                 save(pass_quality_cull(
                     eligible(all_photos),
                     self.cfg.blur_threshold,
-                    self.cfg.brightness_min,
-                    self.cfg.brightness_max,
+                    self.cfg.highlight_threshold,
+                    self.cfg.shadow_threshold,
                 ))
             elif pass_name == "screenshot":
                 save(pass_screenshots(eligible(all_photos)))
