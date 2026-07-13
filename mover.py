@@ -77,6 +77,28 @@ class Mover:
         self.db.update_group_keeper(group_id, new_keeper_id)
         logger.info("Group %d keeper changed to photo %d", group_id, new_keeper_id)
 
+    def keep_all_group(self, group_id: int) -> None:
+        """Skip the group entirely — keep every photo, delete nothing."""
+        group = self.db.get_group(group_id)
+        if not group:
+            raise ValueError(f"Group {group_id} not found")
+        for photo_id in group.member_ids:
+            self._set_photo_status(photo_id, ReviewStatus.PENDING)
+        self.db.update_group_status(group_id, ReviewStatus.SKIPPED)
+        logger.info("Keep-all group %d: %d photos kept", group_id, len(group.member_ids))
+
+    def delete_all_group(self, group_id: int) -> int:
+        """Approve every photo in the group for deletion (no keeper)."""
+        group = self.db.get_group(group_id)
+        if not group:
+            raise ValueError(f"Group {group_id} not found")
+        for photo_id in group.member_ids:
+            self._set_photo_status(photo_id, ReviewStatus.APPROVED_DELETE)
+            self.db.record_move(photo_id, "", "", "approve_delete")
+        self.db.update_group_status(group_id, ReviewStatus.APPROVED_DELETE)
+        logger.info("Delete-all group %d: %d photos queued", group_id, len(group.member_ids))
+        return len(group.member_ids)
+
     # ── batch operations ───────────────────────────────────────────────────
 
     def approve_all_high_confidence(self, min_confidence: float = 0.75) -> tuple[int, int]:

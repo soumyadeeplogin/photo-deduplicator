@@ -49,6 +49,15 @@
     <button onclick="approveGroup({{ group.id }})" class="btn btn-danger">
       ✓ Approve Delete <span class="kbd-hint"><kbd>D</kbd></span>
     </button>
+    <button onclick="keepAllGroup({{ group.id }})" class="btn btn-success"
+            title="Keep every photo in this group — don't delete anything">
+      ★ Keep All
+    </button>
+    <button onclick="deleteAllGroup({{ group.id }})" class="btn btn-danger"
+            style="background:var(--purple);"
+            title="Queue every photo in this group for deletion (no keeper)">
+      ✕ Delete All
+    </button>
     <button onclick="skipGroup({{ group.id }})" class="btn btn-ghost">
       Skip <span class="kbd-hint"><kbd>S</kbd></span>
     </button>
@@ -91,16 +100,16 @@
       </div>
       <div class="compare-wrap" id="compare-wrap">
         <div class="compare-side" id="cmp-left">
-          <img src="/cache/thumbnails/{{ keep_p.thumbnail_path.split('/')[-1] }}"
+          <img src="/photo/{{ keep_p.id }}/original"
                onclick="openLightbox('/photo/{{ keep_p.id }}/original')"
-               style="cursor:zoom-in;" alt="KEEP">
+               style="cursor:zoom-in;" loading="lazy" alt="KEEP">
           <div class="compare-label" style="background:rgba(22,163,74,.8);">KEEP · {{ keep_p.filename[:20] }}</div>
         </div>
         <div class="compare-divider" id="cmp-divider"></div>
         <div class="compare-side" id="cmp-right">
-          <img src="/cache/thumbnails/{{ trash_p.thumbnail_path.split('/')[-1] }}"
+          <img src="/photo/{{ trash_p.id }}/original"
                onclick="openLightbox('/photo/{{ trash_p.id }}/original')"
-               style="cursor:zoom-in;" alt="TRASH">
+               style="cursor:zoom-in;" loading="lazy" alt="TRASH">
           <div class="compare-label" style="background:rgba(220,38,38,.8);">TRASH · {{ trash_p.filename[:20] }}</div>
         </div>
       </div>

@@ -407,6 +407,58 @@ kbd {
 #hist-row-hover tr:hover { background: var(--surface2); }
 table tr:hover td { background: var(--surface2); }
 
+/* ── folder browser widget (shared: setup + export pages) ────────────────── */
+.browser-box {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 14px;
+  max-height: 260px;
+  overflow-y: auto;
+  display: none;
+}
+.browser-box.open { display: block; }
+.browser-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: .78rem;
+  color: var(--text-muted);
+  position: sticky;
+  top: 0;
+  background: var(--surface2);
+  z-index: 1;
+}
+.browser-crumb {
+  font-family: monospace;
+  font-size: .75rem;
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.browser-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 14px;
+  cursor: pointer;
+  font-size: .82rem;
+  border-bottom: 1px solid var(--border);
+  transition: background .1s;
+}
+.browser-item:last-child { border-bottom: none; }
+.browser-item:hover { background: var(--surface); }
+.browser-item .icon { opacity: .5; flex-shrink: 0; }
+.browser-empty {
+  padding: 20px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: .82rem;
+}
+
 /* ── side-by-side compare (detail page) ──────────────────────────────────── */
 .compare-wrap {
   display: flex;
@@ -427,10 +479,10 @@ table tr:hover td { background: var(--surface2); }
 }
 .compare-side img {
   width: 100%;
-  height: 100%;
+  height: auto;
+  max-height: 520px;
   object-fit: contain;
   display: block;
-  max-height: 420px;
 }
 .compare-label {
   position: absolute;

@@ -91,6 +91,29 @@ async function changeKeeper(groupId, photoId) {
   }
 }
 
+async function keepAllGroup(groupId) {
+  try {
+    await api("POST", `/review/${groupId}/keep_all`);
+    toast("All photos kept — group skipped", "success");
+    updateGroupStatus(groupId, "skipped");
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
+async function deleteAllGroup(groupId) {
+  if (!confirm("Queue every photo in this group for deletion (no keeper)? You can still undo this.")) return;
+  try {
+    const data = await api("POST", `/review/${groupId}/delete_all`);
+    toast(`Queued ${data.approved} photo(s) for deletion`, "success");
+    updateGroupStatus(groupId, "approved_delete");
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
 function updateGroupStatus(groupId, status) {
   // Update status chip in-place without full reload
   const chip = document.querySelector(`[data-group-id="${groupId}"] .status-chip`);

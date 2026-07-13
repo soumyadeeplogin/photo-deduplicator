@@ -1,19 +1,49 @@
 {% extends "base.html" %}
-{% block title %}Export as JPEG — Photo Deduplicator{% endblock %}
-{% block page_title %}Export as JPEG{% endblock %}
+{% block title %}RAW → JPEG Export — Photo Deduplicator{% endblock %}
+{% block page_title %}RAW → JPEG Export{% endblock %}
 
 {% block content %}
-<div class="card" style="max-width:640px; padding:24px 28px;">
+<div class="card" style="max-width:680px; padding:24px 28px;">
   <p style="color:var(--text-muted); margin-bottom:20px; font-size:.88rem;">
-    Convert RAW (and any other supported format) to JPEG. Originals are never touched.
+    Convert photos to JPEG. Completely independent — works without scanning.
+    Originals are never modified.
   </p>
+
+  {# ── Source folder ── #}
+  <div class="filter-group" style="margin-bottom:8px;">
+    <label style="font-weight:600;">Source folder</label>
+    <div style="display:flex; gap:8px; margin-top:4px;">
+      <input type="text" id="exp-src"
+             placeholder="e.g. /Users/you/Photos/RAW"
+             style="flex:1; background:var(--surface2); border:1px solid var(--border);
+                    border-radius:6px; color:var(--text); padding:9px 12px;
+                    font-size:.88rem; font-family:monospace; outline:none;"
+             value="{{ current_folder }}">
+      <button onclick="toggleSrcBrowser()" class="btn btn-ghost" id="exp-src-browse-btn"
+              title="Browse folders">📁 Browse</button>
+    </div>
+    <span class="text-muted text-sm">Folder to read photos from (recursively).</span>
+  </div>
+
+  {# ── Source folder browser ── #}
+  <div class="browser-box" id="exp-src-browser-box" style="margin-bottom:16px;">
+    <div class="browser-header">
+      <button onclick="srcBrowserUp()" class="btn btn-ghost btn-sm btn-icon"
+              id="exp-src-browser-up" title="Parent folder">↑</button>
+      <span class="browser-crumb" id="exp-src-browser-crumb">…</span>
+      <button onclick="selectSrcFolder()" class="btn btn-primary btn-sm"
+              style="margin-left:auto;">Select</button>
+    </div>
+    <div id="exp-src-browser-list"></div>
+  </div>
 
   {# ── Export scope ── #}
   <div class="filter-group" style="margin-bottom:16px;">
     <label style="font-weight:600;">Export scope</label>
-    <select id="exp-scope" style="width:100%; margin-top:4px;">
-      <option value="all">All photos in folder (and subfolders)</option>
-      <option value="keepers">Keepers only (not flagged for deletion)</option>
+    <select id="exp-scope" style="width:100%; margin-top:4px; background:var(--surface2);
+            border:1px solid var(--border); border-radius:6px; color:var(--text);
+            padding:8px 10px; font-size:.88rem;">
+      <option value="all">All supported photos</option>
       <option value="raw">RAW files only</option>
     </select>
   </div>
@@ -28,19 +58,19 @@
                     border-radius:6px; color:var(--text); padding:9px 12px;
                     font-size:.88rem; font-family:monospace; outline:none;"
              value="{{ suggested_dest }}">
-      <button onclick="toggleExpBrowser()" class="btn btn-ghost" id="exp-browse-btn"
+      <button onclick="toggleDestBrowser()" class="btn btn-ghost" id="exp-browse-btn"
               title="Browse folders">📁 Browse</button>
     </div>
     <span class="text-muted text-sm">Folder will be created if it doesn't exist.</span>
   </div>
 
-  {# ── Folder browser widget ── #}
+  {# ── Destination folder browser ── #}
   <div class="browser-box" id="exp-browser-box" style="margin-bottom:16px;">
     <div class="browser-header">
-      <button onclick="expBrowserUp()" class="btn btn-ghost btn-sm btn-icon"
+      <button onclick="destBrowserUp()" class="btn btn-ghost btn-sm btn-icon"
               id="exp-browser-up" title="Parent folder">↑</button>
       <span class="browser-crumb" id="exp-browser-crumb">…</span>
-      <button onclick="selectExpFolder()" class="btn btn-primary btn-sm"
+      <button onclick="selectDestFolder()" class="btn btn-primary btn-sm"
               style="margin-left:auto;">Select</button>
     </div>
     <div id="exp-browser-list"></div>
@@ -54,7 +84,6 @@
         <strong>Preserve folder structure</strong>
         <span class="text-muted" style="font-size:.8rem; display:block; margin-top:1px;">
           Subfolders are mirrored inside the output folder
-          (e.g. <code style="font-size:.75rem;">Safari/DSC_0001.jpg</code>)
         </span>
       </span>
     </label>
@@ -78,7 +107,7 @@
 
 {# ── Progress card ── #}
 <div id="exp-progress-card" class="card"
-     style="max-width:640px; padding:24px 28px; display:none; margin-top:16px;">
+     style="max-width:680px; padding:24px 28px; display:none; margin-top:16px;">
   <div style="display:flex; align-items:center; gap:12px; margin-bottom:12px;">
     <span style="font-weight:600;" id="exp-status-label">Exporting…</span>
     <span id="exp-count" class="text-muted text-sm"></span>
@@ -94,39 +123,36 @@
 
 {% block scripts %}
 <script>
-// ── inline folder browser for export dest ────────────────────────────────────
-let _expBrowserOpen = false;
-let _expBrowserCurrentPath = "";
+// ── Source folder browser ─────────────────────────────────────────────────────
+let _srcBrowserOpen = false;
+let _srcBrowserCurrentPath = "";
 
-function toggleExpBrowser() {
-  _expBrowserOpen = !_expBrowserOpen;
-  document.getElementById("exp-browser-box").classList.toggle("open", _expBrowserOpen);
-  if (_expBrowserOpen) {
-    const cur = document.getElementById("exp-dest").value.trim();
-    loadExpBrowser(cur || "");
+function toggleSrcBrowser() {
+  _srcBrowserOpen = !_srcBrowserOpen;
+  document.getElementById("exp-src-browser-box").classList.toggle("open", _srcBrowserOpen);
+  if (_srcBrowserOpen) {
+    const cur = document.getElementById("exp-src").value.trim();
+    loadSrcBrowser(cur || "");
   }
 }
 
-async function loadExpBrowser(path) {
-  const listEl = document.getElementById("exp-browser-list");
-  const crumb  = document.getElementById("exp-browser-crumb");
-  const upBtn  = document.getElementById("exp-browser-up");
-
+async function loadSrcBrowser(path) {
+  const listEl = document.getElementById("exp-src-browser-list");
+  const crumb  = document.getElementById("exp-src-browser-crumb");
+  const upBtn  = document.getElementById("exp-src-browser-up");
   listEl.innerHTML = '<div class="browser-empty">Loading…</div>';
   try {
     const res  = await fetch("/api/browse?path=" + encodeURIComponent(path));
     const data = await res.json();
-    _expBrowserCurrentPath = data.path || "";
+    _srcBrowserCurrentPath = data.path || "";
     crumb.textContent = data.path || "Select a drive";
     upBtn.disabled    = !data.parent;
     upBtn.dataset.parent = data.parent || "";
-
     if (!data.dirs.length) {
       listEl.innerHTML = '<div class="browser-empty">No sub-folders here</div>';
     } else {
       listEl.innerHTML = data.dirs.map(d =>
-        `<div class="browser-item"
-              onclick="loadExpBrowser(${JSON.stringify(d.path)})">
+        `<div class="browser-item" onclick="loadSrcBrowser(${JSON.stringify(d.path)})">
            <span class="icon">📁</span><span>${d.name}</span>
          </div>`
       ).join("");
@@ -136,26 +162,80 @@ async function loadExpBrowser(path) {
   }
 }
 
-function expBrowserUp() {
-  const parent = document.getElementById("exp-browser-up").dataset.parent;
-  if (parent) loadExpBrowser(parent);
+function srcBrowserUp() {
+  const parent = document.getElementById("exp-src-browser-up").dataset.parent;
+  if (parent) loadSrcBrowser(parent);
 }
 
-function selectExpFolder() {
-  if (_expBrowserCurrentPath) {
-    document.getElementById("exp-dest").value = _expBrowserCurrentPath;
+function selectSrcFolder() {
+  if (_srcBrowserCurrentPath) {
+    document.getElementById("exp-src").value = _srcBrowserCurrentPath;
   }
-  _expBrowserOpen = false;
+  _srcBrowserOpen = false;
+  document.getElementById("exp-src-browser-box").classList.remove("open");
+}
+
+// ── Destination folder browser ────────────────────────────────────────────────
+let _destBrowserOpen = false;
+let _destBrowserCurrentPath = "";
+
+function toggleDestBrowser() {
+  _destBrowserOpen = !_destBrowserOpen;
+  document.getElementById("exp-browser-box").classList.toggle("open", _destBrowserOpen);
+  if (_destBrowserOpen) {
+    const cur = document.getElementById("exp-dest").value.trim();
+    loadDestBrowser(cur || "");
+  }
+}
+
+async function loadDestBrowser(path) {
+  const listEl = document.getElementById("exp-browser-list");
+  const crumb  = document.getElementById("exp-browser-crumb");
+  const upBtn  = document.getElementById("exp-browser-up");
+  listEl.innerHTML = '<div class="browser-empty">Loading…</div>';
+  try {
+    const res  = await fetch("/api/browse?path=" + encodeURIComponent(path));
+    const data = await res.json();
+    _destBrowserCurrentPath = data.path || "";
+    crumb.textContent = data.path || "Select a drive";
+    upBtn.disabled    = !data.parent;
+    upBtn.dataset.parent = data.parent || "";
+    if (!data.dirs.length) {
+      listEl.innerHTML = '<div class="browser-empty">No sub-folders here</div>';
+    } else {
+      listEl.innerHTML = data.dirs.map(d =>
+        `<div class="browser-item" onclick="loadDestBrowser(${JSON.stringify(d.path)})">
+           <span class="icon">📁</span><span>${d.name}</span>
+         </div>`
+      ).join("");
+    }
+  } catch(e) {
+    listEl.innerHTML = '<div class="browser-empty">Error loading folders</div>';
+  }
+}
+
+function destBrowserUp() {
+  const parent = document.getElementById("exp-browser-up").dataset.parent;
+  if (parent) loadDestBrowser(parent);
+}
+
+function selectDestFolder() {
+  if (_destBrowserCurrentPath) {
+    document.getElementById("exp-dest").value = _destBrowserCurrentPath;
+  }
+  _destBrowserOpen = false;
   document.getElementById("exp-browser-box").classList.remove("open");
 }
 
 // ── export ────────────────────────────────────────────────────────────────────
 async function startExport() {
+  const src               = document.getElementById("exp-src").value.trim();
   const scope             = document.getElementById("exp-scope").value;
   const dest              = document.getElementById("exp-dest").value.trim();
   const quality           = parseInt(document.getElementById("exp-quality").value);
   const preserve_structure = document.getElementById("exp-preserve").checked;
 
+  if (!src)  { toast("Please enter a source folder.", "error"); return; }
   if (!dest) { toast("Please enter an output folder.", "error"); return; }
 
   document.getElementById("exp-btn").disabled = true;
@@ -165,7 +245,7 @@ async function startExport() {
   document.getElementById("exp-message").textContent = "";
 
   try {
-    await api("POST", "/api/export", { scope, dest, quality, preserve_structure });
+    await api("POST", "/api/export", { src, scope, dest, quality, preserve_structure });
   } catch (e) {
     toast(`Error: ${e.message}`, "error");
     document.getElementById("exp-btn").disabled = false;
