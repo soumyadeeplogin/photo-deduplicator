@@ -1,55 +1,33 @@
-(.venv) PS C:\new_dedup\photo-deduplicator> python app.py --folder C:\photo_sorter\Goa2023  --review
-============================================================
-  Scanning: C:\photo_sorter\Goa2023
-============================================================
-23:50:01  INFO      scanner  Scanning C:\photo_sorter\Goa2023 with 11 workers
-23:50:01  INFO      scanner  Discovered 319 image files
-  [░░░░░░░░░░░░░░░░░░░░]   0%  Discovered 319 files23:50:01  INFO      scanner  All 319 photos are up-to-date, skipping analysis
-  [████████████████████] 100%  All photos up-to-date
-  All photos up-to-date.
-
-  Total photos : 319
-  Total size   : 2.4 GB
-  Groups found : 0
-  Space to save: 0.0 B
-
-  Starting web UI at http://127.0.0.1:8080
-  Press Ctrl+C to stop.
-
-23:50:16  INFO      scanner  Scanning C:\photo_sorter\Goa2023 with 11 workers
-23:50:16  INFO      scanner  Discovered 319 image files
-23:50:16  INFO      scanner  All 319 photos are up-to-date, skipping analysis
-23:50:16  INFO      duplicate_engine  [Pass 1] Exact duplicates (319 photos)
-23:50:16  INFO      duplicate_engine    Found 0 exact-duplicate groups
-23:50:16  INFO      duplicate_engine  [Pass 2] Burst shots (window=3.0s, pHash≤10, 319 photos)
-23:50:16  INFO      duplicate_engine    319/319 photos have timestamp+pHash
-23:50:16  INFO      duplicate_engine    Found 21 burst groups
-Exception in thread Thread-2 (_run):
+Possibly corrupted field NoiseReduction in MakerNote IFD
+Possibly corrupted field NoiseReduction in MakerNote IFD
+21:05:22  ERROR     review_server  Scan failed: bad parameter or other API misuse
 Traceback (most recent call last):
-  File "C:\Users\soumy\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 1044, in _bootstrap_inner
-    self.run()
-    ~~~~~~~~^^
-  File "C:\Users\soumy\AppData\Local\Programs\Python\Python313\Lib\threading.py", line 995, in run
-    self._target(*self._args, **self._kwargs)
-    ~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\new_dedup\photo-deduplicator\review_server.py", line 273, in _run
-    engine.run(progress_cb=_progress_cb)
-    ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\new_dedup\photo-deduplicator\duplicate_engine.py", line 393, in run
-    save(pass_burst_shots(
-    ~~~~^^^^^^^^^^^^^^^^^^
-        eligible(all_photos),
-        ^^^^^^^^^^^^^^^^^^^^^
-        self.cfg.burst_window_sec,
-        ^^^^^^^^^^^^^^^^^^^^^^^^^^
-        self.cfg.phash_threshold,
-        ^^^^^^^^^^^^^^^^^^^^^^^^^
-    ))
-    ^^
-  File "C:\new_dedup\photo-deduplicator\duplicate_engine.py", line 379, in save
-    self.db.insert_group(reason, notes, confidence, keeper_id, member_ids)
-    ~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "C:\new_dedup\photo-deduplicator\database.py", line 219, in insert_group
-    group_id = c.lastrowid
-               ^^^^^^^^^^^
-AttributeError: 'sqlite3.Connection' object has no attribute 'lastrowid'
+  File "C:\new_dedup\photo-deduplicator\review_server.py", line 151, in _set_folder_and_scan
+    new_state.scanner.scan(progress_cb=_progress_cb)
+    ~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\new_dedup\photo-deduplicator\scanner.py", line 352, in scan
+    self.db.update_photo_analysis(photo_id, **result)
+    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^
+  File "C:\new_dedup\photo-deduplicator\database.py", line 181, in update_photo_analysis
+    c.execute(
+    ~~~~~~~~~^
+        f"UPDATE photos SET {cols} WHERE id = ?",
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (*fields.values(), photo_id),
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+sqlite3.InterfaceError: bad parameter or other API misuse
+21:05:22  INFO      scanner  Generating 876 thumbnails
+21:05:49  INFO      duplicate_engine  [Pass 1] Exact duplicates (876 photos)
+21:05:49  INFO      duplicate_engine    Found 0 exact-duplicate groups
+21:05:49  INFO      duplicate_engine  [Pass 2] Burst shots (window=3.0s, pHash≤10, 876 photos)
+21:05:49  INFO      duplicate_engine    876/876 photos have timestamp+pHash
+21:05:49  INFO      duplicate_engine    Found 36 burst groups
+21:05:49  INFO      duplicate_engine  [Pass 3] Quality cull (730 photos)
+21:05:49  INFO      duplicate_engine    Flagged 344 low-quality photos
+21:05:50  INFO      duplicate_engine  [Pass 4] Screenshots (386 photos)
+21:05:50  INFO      duplicate_engine    Found 0 screenshots
+21:05:50  INFO      duplicate_engine  [Pass 5] Near-duplicates (pHash≤8, 386 photos)
+21:05:50  INFO      duplicate_engine    Found 9 near-duplicate groups
+21:05:50  INFO      duplicate_engine  Detection complete: 389 groups created
