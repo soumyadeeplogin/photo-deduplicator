@@ -17,28 +17,12 @@ def thumbnail_filename(photo_path: Path) -> str:
 
 
 def _open_as_pil(photo_path: Path):
-    """Open any supported image as a PIL Image (RGB). Returns None on failure."""
+    """Open a supported image as a PIL Image (RGB). Returns None on failure."""
     from PIL import Image
-    from config import RAW_EXTENSIONS
-    suffix = photo_path.suffix.lower()
-    if suffix in RAW_EXTENSIONS:
-        try:
-            import rawpy
-            with rawpy.imread(str(photo_path)) as raw:
-                rgb = raw.postprocess(
-                    use_camera_wb=True,
-                    half_size=True,
-                    no_auto_bright=False,
-                    output_bps=8,
-                )
-            return Image.fromarray(rgb).convert("RGB")
-        except Exception:
-            return None
-    else:
-        try:
-            return Image.open(photo_path).convert("RGB")
-        except Exception:
-            return None
+    try:
+        return Image.open(photo_path).convert("RGB")
+    except Exception:
+        return None
 
 
 def generate_thumbnail(

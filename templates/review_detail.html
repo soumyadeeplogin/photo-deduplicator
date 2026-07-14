@@ -43,20 +43,11 @@
   <span class="text-muted text-sm" style="margin-left:8px;">{{ group.notes }}</span>
 </div>
 
-{# ── action buttons ───────────────────────────────────────────────────── #}
+{# ── group-level action buttons ───────────────────────────────────────── #}
 <div class="flex gap-2 mb-3" style="flex-wrap:wrap;">
   {% if group.review_status.value == 'pending' %}
     <button onclick="approveGroup({{ group.id }})" class="btn btn-danger">
       ✓ Approve Delete <span class="kbd-hint"><kbd>D</kbd></span>
-    </button>
-    <button onclick="keepAllGroup({{ group.id }})" class="btn btn-success"
-            title="Keep every photo in this group — don't delete anything">
-      ★ Keep All
-    </button>
-    <button onclick="deleteAllGroup({{ group.id }})" class="btn btn-danger"
-            style="background:var(--purple);"
-            title="Queue every photo in this group for deletion (no keeper)">
-      ✕ Delete All
     </button>
     <button onclick="skipGroup({{ group.id }})" class="btn btn-ghost">
       Skip <span class="kbd-hint"><kbd>S</kbd></span>
@@ -82,6 +73,11 @@
     </a>
   {% endif %}
 </div>
+
+<p class="text-muted text-sm mb-3" style="font-size:.8rem;">
+  Use the <strong>Keep</strong> / <strong>Delete</strong> buttons on each photo to decide individually,
+  then use <strong>Approve Delete</strong> above to finalise.
+</p>
 
 {# ── side-by-side comparison (only when group has exactly 2 members) ─── #}
 {% if group.member_ids | length == 2 %}
@@ -123,7 +119,15 @@
     {% set p = photos.get(photo_id) %}
     {% if p %}
       {% set is_keep = (photo_id == group.keeper_id) %}
-      <div class="detail-photo {{ 'is-keep' if is_keep else 'is-trash' }}">
+      {% set p_status = p.review_status.value %}
+      {% if p_status == 'kept' %}
+        {% set card_class = 'is-keep' %}
+      {% elif p_status == 'approved_delete' %}
+        {% set card_class = 'is-trash' %}
+      {% else %}
+        {% set card_class = 'is-pending' %}
+      {% endif %}
+      <div class="detail-photo {{ card_class }}" data-photo-id="{{ p.id }}">
 
         {# image with click-to-zoom #}
         {% if p.thumbnail_path %}
@@ -136,14 +140,24 @@
         {% endif %}
 
         <div class="detail-photo-meta">
-          <div class="flex items-center gap-2 mb-3" style="flex-wrap:wrap;">
-            <span class="photo-label {{ 'label-keep' if is_keep else 'label-trash' }}"
-                  style="position:static; font-size:.75rem;">
-              {{ 'KEEP' if is_keep else 'TRASH' }}
+          <div class="flex items-center gap-2 mb-1" style="flex-wrap:wrap;">
+            {# Decision badge — updates in-place via JS #}
+            {% if p_status == 'kept' %}
+              {% set decision_label = 'KEEP' %}
+              {% set decision_cls   = 'kept' %}
+            {% elif p_status == 'approved_delete' %}
+              {% set decision_label = 'DELETE' %}
+              {% set decision_cls   = 'approved_delete' %}
+            {% else %}
+              {% set decision_label = 'UNDECIDED' %}
+              {% set decision_cls   = 'pending' %}
+            {% endif %}
+            <span class="photo-decision-badge decision-{{ decision_cls }}">
+              {{ decision_label }}
             </span>
             <strong style="font-size:.85rem;">{{ p.filename }}</strong>
             <a href="/photo/{{ p.id }}/original" target="_blank"
-               class="btn btn-ghost btn-sm ml-auto" title="Open original (O)">⬡ Original</a>
+               class="btn btn-ghost btn-sm ml-auto" title="Open original">⬡ Original</a>
             {% if p.google_photos_url %}
               <a href="{{ p.google_photos_url }}" target="_blank" rel="noopener"
                  class="btn btn-ghost btn-sm" title="Open in Google Photos"
@@ -151,9 +165,30 @@
                 ☁ Google Photos
               </a>
             {% endif %}
-            {% if not is_keep and group.review_status.value == 'pending' %}
+          </div>
+
+          {# Per-photo decision buttons #}
+          {% if group.review_status.value not in ['moved', 'deleted'] %}
+          <div class="flex gap-1 mb-2" style="flex-wrap:wrap;">
+            <button onclick="keepPhoto({{ group.id }}, {{ p.id }})"
+                    class="btn btn-success btn-sm btn-keep-photo"
+                    {% if p_status == 'kept' %}style="display:none"{% endif %}
+                    title="Mark this photo as keep">★ Keep</button>
+            <button onclick="deletePhoto({{ group.id }}, {{ p.id }})"
+                    class="btn btn-danger btn-sm btn-delete-photo"
+                    {% if p_status == 'approved_delete' %}style="display:none"{% endif %}
+                    title="Queue this photo for deletion">✕ Delete</button>
+            <button onclick="resetPhoto({{ group.id }}, {{ p.id }})"
+                    class="btn btn-ghost btn-sm btn-reset-photo"
+                    {% if p_status not in ['kept','approved_delete'] %}style="display:none"{% endif %}
+                    title="Reset to undecided">↩ Reset</button>
+          </div>
+          {% endif %}
+
+          <div class="flex items-center gap-2 mb-1" style="flex-wrap:wrap;">
+            {% if p_status == 'pending' and group.review_status.value == 'pending' %}
               <button onclick="changeKeeper({{ group.id }}, {{ p.id }}); location.reload();"
-                      class="btn btn-ghost btn-sm" title="Make this the keeper">☆ Make Keeper</button>
+                      class="btn btn-ghost btn-sm" title="Make this the suggested keeper">☆ Make Keeper</button>
             {% endif %}
           </div>
 

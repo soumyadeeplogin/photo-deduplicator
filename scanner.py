@@ -17,7 +17,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from config import IMAGE_EXTENSIONS, RAW_EXTENSIONS, SCREEN_RESOLUTIONS, Config
+from config import IMAGE_EXTENSIONS, SCREEN_RESOLUTIONS, Config
 from database import Database
 from thumbnail import generate_thumbnail_worker
 
@@ -27,57 +27,18 @@ logger = logging.getLogger(__name__)
 # ── top-level worker functions (must be picklable) ───────────────────────────
 
 def _load_image_array(path: Path):
-    """
-    Load an image as an BGR numpy array for OpenCV.
-    Handles both standard formats (via cv2) and RAW files (via rawpy).
-    Returns None on failure.
-    """
+    """Load an image as a BGR numpy array for OpenCV. Returns None on failure."""
     import cv2
-    suffix = path.suffix.lower()
-    if suffix in RAW_EXTENSIONS:
-        try:
-            import rawpy
-            import numpy as np
-            with rawpy.imread(str(path)) as raw:
-                rgb = raw.postprocess(
-                    use_camera_wb=True,
-                    half_size=False,
-                    no_auto_bright=False,
-                    output_bps=8,
-                )
-            return cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
-        except Exception:
-            return None
-    else:
-        return cv2.imread(str(path))
+    return cv2.imread(str(path))
 
 
 def _load_pil_image(path: Path):
-    """
-    Load a PIL Image. For RAW files uses rawpy → numpy → PIL.
-    Returns None on failure.
-    """
+    """Load a PIL Image. Returns None on failure."""
     from PIL import Image
-    suffix = path.suffix.lower()
-    if suffix in RAW_EXTENSIONS:
-        try:
-            import rawpy
-            import numpy as np
-            with rawpy.imread(str(path)) as raw:
-                rgb = raw.postprocess(
-                    use_camera_wb=True,
-                    half_size=True,   # half-res is fine for pHash
-                    no_auto_bright=False,
-                    output_bps=8,
-                )
-            return Image.fromarray(rgb)
-        except Exception:
-            return None
-    else:
-        try:
-            return Image.open(path)
-        except Exception:
-            return None
+    try:
+        return Image.open(path)
+    except Exception:
+        return None
 
 
 def _analyse_photo(args: tuple) -> dict:

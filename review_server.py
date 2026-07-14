@@ -61,11 +61,6 @@ logger = logging.getLogger(__name__)
 _scan_progress: dict = {"current": 0, "total": 0, "message": "", "done": True, "error": ""}
 _scan_lock = threading.Lock()
 
-# ── shared export progress ────────────────────────────────────────────────────
-
-_export_progress: dict = {"current": 0, "total": 0, "message": "", "done": True, "error": "", "dest": ""}
-_export_lock = threading.Lock()
-
 
 def _progress_cb(current: int, total: int, message: str) -> None:
     with _scan_lock:
@@ -349,25 +344,48 @@ def create_app(initial_folder: Optional[Path], cfg: Config) -> FastAPI:
         except ValueError as e:
             raise HTTPException(400, str(e))
 
-    @app.post("/review/{group_id}/keep_all")
-    async def keep_all(group_id: int):
-        """Mark all photos in the group as skipped (keep everything, delete nothing)."""
+    @app.post("/review/{group_id}/photo/{photo_id}/keep")
+    async def keep_photo(group_id: int, photo_id: int):
+        """Mark a single photo as kept (not for deletion)."""
         s = _require_state()
-        try:
-            s.mover.keep_all_group(group_id)
-            return {"ok": True}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
+        group = s.db.get_group(group_id)
+        if not group:
+            raise HTTPException(404, "Group not found")
+        if photo_id not in group.member_ids:
+            raise HTTPException(400, "Photo not in group")
+        s.db.update_photo_analysis(photo_id, review_status=ReviewStatus.KEPT.value)
+        return {"ok": True, "photo_id": photo_id, "status": "kept"}
 
-    @app.post("/review/{group_id}/delete_all")
-    async def delete_all(group_id: int):
-        """Queue every photo in the group for deletion (no keeper)."""
+    @app.post("/review/{group_id}/photo/{photo_id}/delete")
+    async def delete_photo(group_id: int, photo_id: int):
+        """Queue a single photo for deletion."""
         s = _require_state()
-        try:
-            count = s.mover.delete_all_group(group_id)
-            return {"ok": True, "approved": count}
-        except ValueError as e:
-            raise HTTPException(400, str(e))
+        group = s.db.get_group(group_id)
+        if not group:
+            raise HTTPException(404, "Group not found")
+        if photo_id not in group.member_ids:
+            raise HTTPException(400, "Photo not in group")
+        s.db.update_photo_analysis(photo_id, review_status=ReviewStatus.APPROVED_DELETE.value)
+        s.db.record_move(photo_id, "", "", "approve_delete")
+        # Update group status to reflect that at least one photo is approved
+        s.db.update_group_status(group_id, ReviewStatus.APPROVED_DELETE)
+        return {"ok": True, "photo_id": photo_id, "status": "approved_delete"}
+
+    @app.post("/review/{group_id}/photo/{photo_id}/pending")
+    async def reset_photo(group_id: int, photo_id: int):
+        """Reset a single photo back to pending."""
+        s = _require_state()
+        group = s.db.get_group(group_id)
+        if not group:
+            raise HTTPException(404, "Group not found")
+        if photo_id not in group.member_ids:
+            raise HTTPException(400, "Photo not in group")
+        s.db.update_photo_analysis(photo_id, review_status=ReviewStatus.PENDING.value)
+        # If all photos are now pending, reset group status too
+        photos = s.db.get_photos_by_ids(group.member_ids)
+        if all(p.review_status == ReviewStatus.PENDING for p in photos):
+            s.db.update_group_status(group_id, ReviewStatus.PENDING)
+        return {"ok": True, "photo_id": photo_id, "status": "pending"}
 
     @app.post("/photo/{photo_id}/rate/{stars}")
     async def rate_photo(photo_id: int, stars: int):
@@ -554,128 +572,6 @@ def create_app(initial_folder: Optional[Path], cfg: Config) -> FastAPI:
                 ],
             })
         return JSONResponse(out)
-
-    # ── RAW → JPEG export (independent — no active scan required) ───────────
-
-    @app.get("/export", response_class=HTMLResponse)
-    async def export_page(request: Request):
-        s = _get_state()
-        current_folder = str(s.folder) if s else ""
-        suggested = str(Path(current_folder).parent / "Exported_JPEGs") if current_folder else ""
-        return templates.TemplateResponse(
-            request, "export.html",
-            {"suggested_dest": suggested, "current_folder": current_folder},
-        )
-
-    class ExportBody(BaseModel):
-        src: str = ""           # source folder (independent of scanned folder)
-        scope: str = "all"      # "all" | "raw"
-        dest: str = ""
-        quality: int = 90
-        preserve_structure: bool = True
-
-    @app.post("/api/export")
-    async def start_export(body: ExportBody):
-        if not body.src.strip():
-            raise HTTPException(400, "src (source folder) is required")
-        if not body.dest.strip():
-            raise HTTPException(400, "dest is required")
-        if body.quality < 1 or body.quality > 100:
-            raise HTTPException(400, "quality must be 1-100")
-
-        src_folder = Path(body.src.strip()).expanduser().resolve()
-        if not src_folder.is_dir():
-            raise HTTPException(400, f"Source folder not found: {src_folder}")
-
-        dest = Path(body.dest.strip()).expanduser().resolve()
-
-        def _run_export():
-            from config import IMAGE_EXTENSIONS, RAW_EXTENSIONS
-            from thumbnail import _open_as_pil
-
-            with _export_lock:
-                _export_progress.update(
-                    current=0, total=0, message="Gathering files…",
-                    done=False, error="", dest=str(dest)
-                )
-
-            try:
-                dest.mkdir(parents=True, exist_ok=True)
-
-                # Discover files directly from source folder — no DB needed
-                scope = body.scope
-                exts = RAW_EXTENSIONS if scope == "raw" else IMAGE_EXTENSIONS
-                photo_paths = sorted(
-                    p for p in src_folder.rglob("*")
-                    if p.is_file() and p.suffix.lower() in exts
-                )
-
-                total = len(photo_paths)
-                with _export_lock:
-                    _export_progress.update(total=total, message=f"Exporting {total} photos…")
-
-                done = 0
-                for photo_path in photo_paths:
-                    try:
-                        if body.preserve_structure:
-                            try:
-                                rel_dir = photo_path.parent.relative_to(src_folder)
-                            except ValueError:
-                                rel_dir = Path()
-                            out_dir = dest / rel_dir
-                        else:
-                            out_dir = dest
-
-                        out_dir.mkdir(parents=True, exist_ok=True)
-                        out_name = photo_path.stem + ".jpg"
-                        out_path = out_dir / out_name
-                        counter = 1
-                        while out_path.exists():
-                            counter += 1
-                            out_path = out_dir / f"{photo_path.stem}_{counter}.jpg"
-
-                        img = _open_as_pil(photo_path)
-                        if img is not None:
-                            with img:
-                                img.save(str(out_path), format="JPEG",
-                                         quality=body.quality, optimize=True)
-                    except Exception as exc:
-                        logger.warning("Export skipped %s: %s", photo_path, exc)
-
-                    done += 1
-                    with _export_lock:
-                        _export_progress.update(
-                            current=done,
-                            message=f"Exported {done}/{total}: {photo_path.name}",
-                        )
-
-                with _export_lock:
-                    _export_progress.update(done=True, message=f"Done — {done} files exported")
-
-            except Exception as exc:
-                logger.exception("Export failed: %s", exc)
-                with _export_lock:
-                    _export_progress.update(done=True, error=str(exc),
-                                            message=f"Export failed: {exc}")
-
-        threading.Thread(target=_run_export, daemon=True).start()
-        return {"ok": True}
-
-    @app.get("/api/export/status")
-    async def export_status_sse():
-        def event_stream():
-            while True:
-                with _export_lock:
-                    data = dict(_export_progress)
-                yield f"data: {json.dumps(data)}\n\n"
-                if data.get("done"):
-                    break
-                time.sleep(0.5)
-        return StreamingResponse(
-            event_stream(),
-            media_type="text/event-stream",
-            headers={"Cache-Control": "no-cache"},
-        )
 
     # ── initial scan if folder provided at startup ─────────────────────────
 

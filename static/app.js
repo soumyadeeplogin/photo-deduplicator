@@ -91,27 +91,66 @@ async function changeKeeper(groupId, photoId) {
   }
 }
 
-async function keepAllGroup(groupId) {
+async function keepPhoto(groupId, photoId) {
   try {
-    await api("POST", `/review/${groupId}/keep_all`);
-    toast("All photos kept — group skipped", "success");
-    updateGroupStatus(groupId, "skipped");
-    setTimeout(() => location.reload(), 600);
+    await api("POST", `/review/${groupId}/photo/${photoId}/keep`);
+    toast("Photo marked as keep", "success");
+    updatePhotoDecision(photoId, "kept");
   } catch (e) {
     toast(`Error: ${e.message}`, "error");
   }
 }
 
-async function deleteAllGroup(groupId) {
-  if (!confirm("Queue every photo in this group for deletion (no keeper)? You can still undo this.")) return;
+async function deletePhoto(groupId, photoId) {
   try {
-    const data = await api("POST", `/review/${groupId}/delete_all`);
-    toast(`Queued ${data.approved} photo(s) for deletion`, "success");
+    await api("POST", `/review/${groupId}/photo/${photoId}/delete`);
+    toast("Photo queued for deletion", "success");
+    updatePhotoDecision(photoId, "approved_delete");
     updateGroupStatus(groupId, "approved_delete");
-    setTimeout(() => location.reload(), 600);
   } catch (e) {
     toast(`Error: ${e.message}`, "error");
   }
+}
+
+async function resetPhoto(groupId, photoId) {
+  try {
+    const data = await api("POST", `/review/${groupId}/photo/${photoId}/pending`);
+    toast("Photo reset to pending", "info");
+    updatePhotoDecision(photoId, "pending");
+    if (data.status === "pending") updateGroupStatus(groupId, "pending");
+  } catch (e) {
+    toast(`Error: ${e.message}`, "error");
+  }
+}
+
+function updatePhotoDecision(photoId, status) {
+  const card = document.querySelector(`.detail-photo[data-photo-id="${photoId}"]`);
+  if (!card) return;
+  const badge = card.querySelector(".photo-decision-badge");
+  if (badge) {
+    badge.className = `photo-decision-badge decision-${status}`;
+    badge.textContent = _decisionLabel(status);
+  }
+  card.className = card.className.replace(/\bis-(keep|trash|pending)\b/g, "").trimEnd();
+  if (status === "kept")             card.classList.add("is-keep");
+  else if (status === "approved_delete") card.classList.add("is-trash");
+  else                               card.classList.add("is-pending");
+  _refreshPhotoButtons(card, status);
+}
+
+function _decisionLabel(status) {
+  if (status === "kept")             return "KEEP";
+  if (status === "approved_delete")  return "DELETE";
+  return "UNDECIDED";
+}
+
+function _refreshPhotoButtons(card, status) {
+  const keepBtn   = card.querySelector(".btn-keep-photo");
+  const deleteBtn = card.querySelector(".btn-delete-photo");
+  const resetBtn  = card.querySelector(".btn-reset-photo");
+  if (keepBtn)   keepBtn.style.display   = status === "kept"             ? "none" : "";
+  if (deleteBtn) deleteBtn.style.display = status === "approved_delete"  ? "none" : "";
+  if (resetBtn)  resetBtn.style.display  = status === "pending"          ? "none" : "";
 }
 
 function updateGroupStatus(groupId, status) {

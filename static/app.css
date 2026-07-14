@@ -244,8 +244,21 @@ input, select { font: inherit; }
   max-width: 380px;
   transition: border-color .15s;
 }
-.detail-photo.is-keep  { border-color: var(--green); }
-.detail-photo.is-trash { border-color: var(--red); }
+.detail-photo.is-keep    { border-color: var(--green); }
+.detail-photo.is-trash   { border-color: var(--red); }
+.detail-photo.is-pending { border-color: var(--border); }
+
+.photo-decision-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: .72rem;
+  font-weight: 700;
+  letter-spacing: .04em;
+}
+.decision-kept            { background: var(--green); color: #fff; }
+.decision-approved_delete { background: var(--red);   color: #fff; }
+.decision-pending         { background: var(--border); color: var(--text-muted); }
 .detail-photo img { width: 100%; display: block; cursor: zoom-in; }
 .detail-photo-meta { padding: 10px 12px; font-size: .8rem; }
 .detail-photo-meta table { width: 100%; border-collapse: collapse; }

@@ -45,14 +45,6 @@ class Config:
 IMAGE_EXTENSIONS: frozenset[str] = frozenset({
     ".jpg", ".jpeg", ".png", ".heic", ".heif",
     ".tiff", ".tif", ".webp", ".bmp",
-    # RAW formats
-    ".nef", ".cr2", ".cr3", ".arw", ".orf", ".raf",
-    ".rw2", ".dng", ".pef", ".srw", ".x3f", ".raw",
-})
-
-RAW_EXTENSIONS: frozenset[str] = frozenset({
-    ".nef", ".cr2", ".cr3", ".arw", ".orf", ".raf",
-    ".rw2", ".dng", ".pef", ".srw", ".x3f", ".raw",
 })
 
 SCREEN_RESOLUTIONS: frozenset[tuple[int, int]] = frozenset({
