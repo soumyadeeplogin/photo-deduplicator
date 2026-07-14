@@ -3,7 +3,6 @@ Pillow>=10.0
 imagehash>=4.3
 opencv-python>=4.8
 exifread>=3.0
-rawpy>=0.18
 
 # Web server
 fastapi>=0.111

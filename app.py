@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import logging.handlers
 import os
 import sys
 import webbrowser
@@ -29,13 +30,35 @@ from scanner import Scanner
 
 def _configure_logging(verbose: bool, debug: bool) -> None:
     level = logging.DEBUG if debug else (logging.INFO if verbose else logging.WARNING)
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
-        datefmt="%H:%M:%S",
+    fmt = logging.Formatter(
+        "%(asctime)s  %(levelname)-8s  %(name)s  %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
     )
-    for noisy in ("PIL", "exifread", "urllib3", "asyncio"):
+
+    # Console handler
+    console = logging.StreamHandler()
+    console.setFormatter(fmt)
+
+    # File handler — logs/ next to wherever the app is launched from
+    log_dir = Path.cwd() / "logs"
+    log_dir.mkdir(exist_ok=True)
+    log_file = log_dir / "app.log"
+    file_handler = logging.handlers.RotatingFileHandler(
+        log_file, maxBytes=5 * 1024 * 1024, backupCount=3, encoding="utf-8"
+    )
+    file_handler.setFormatter(fmt)
+    # File always logs at INFO or above regardless of console verbosity
+    file_handler.setLevel(logging.INFO)
+
+    root = logging.getLogger()
+    root.setLevel(level)
+    root.addHandler(console)
+    root.addHandler(file_handler)
+
+    for noisy in ("PIL", "exifread", "urllib3", "asyncio", "watchfiles"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    logging.getLogger(__name__).info("Log file: %s", log_file)
 
 
 def _build_config(args: argparse.Namespace) -> Config:

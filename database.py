@@ -7,9 +7,9 @@ re-analyses files whose (path, mtime, size_bytes) changed.
 
 from __future__ import annotations
 
-import json
 import logging
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
@@ -106,6 +106,7 @@ class Database:
     def __init__(self, db_path: Path) -> None:
         self._path = db_path
         self._conn: Optional[sqlite3.Connection] = None
+        self._lock = threading.Lock()
 
     def connect(self) -> None:
         self._conn = sqlite3.connect(str(self._path), check_same_thread=False)
@@ -147,13 +148,14 @@ class Database:
     @contextmanager
     def tx(self) -> Generator[sqlite3.Cursor, None, None]:
         assert self._conn, "call connect() first"
-        cursor = self._conn.cursor()
-        try:
-            yield cursor
-            self._conn.commit()
-        except Exception:
-            self._conn.rollback()
-            raise
+        with self._lock:
+            cursor = self._conn.cursor()
+            try:
+                yield cursor
+                self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     # ── photo ──────────────────────────────────────────────────────────────
 
@@ -185,31 +187,35 @@ class Database:
 
     def get_photo(self, photo_id: int) -> Optional[PhotoRecord]:
         assert self._conn
-        row = self._conn.execute(
-            "SELECT * FROM photos WHERE id = ?", (photo_id,)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM photos WHERE id = ?", (photo_id,)
+            ).fetchone()
         return _row_to_photo(row) if row else None
 
     def get_photo_by_path(self, path: Path) -> Optional[PhotoRecord]:
         assert self._conn
-        row = self._conn.execute(
-            "SELECT * FROM photos WHERE path = ?", (str(path),)
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM photos WHERE path = ?", (str(path),)
+            ).fetchone()
         return _row_to_photo(row) if row else None
 
     def get_all_photos(self) -> list[PhotoRecord]:
         assert self._conn
-        rows = self._conn.execute("SELECT * FROM photos ORDER BY path").fetchall()
+        with self._lock:
+            rows = self._conn.execute("SELECT * FROM photos ORDER BY path").fetchall()
         return [_row_to_photo(r) for r in rows]
 
     def get_stale_photos(self, paths_mtimes: dict[str, tuple[int, float]]) -> list[str]:
         """Return paths that need re-analysis (new file or mtime/size changed)."""
         assert self._conn
-        stale = []
-        rows = self._conn.execute(
-            "SELECT path, size_bytes, mtime, md5 FROM photos"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT path, size_bytes, mtime, md5 FROM photos"
+            ).fetchall()
         known = {r["path"]: r for r in rows}
+        stale = []
         for path, (size, mtime) in paths_mtimes.items():
             row = known.get(path)
             if row is None or row["size_bytes"] != size or abs(row["mtime"] - mtime) > 0.01:
@@ -226,9 +232,10 @@ class Database:
     def get_photos_missing_analysis(self) -> list[PhotoRecord]:
         """Photos already in the DB but lacking MD5/pHash/sharpness."""
         assert self._conn
-        rows = self._conn.execute(
-            "SELECT * FROM photos WHERE md5 IS NULL OR phash IS NULL"
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT * FROM photos WHERE md5 IS NULL OR phash IS NULL"
+            ).fetchall()
         return [_row_to_photo(r) for r in rows]
 
     def get_photos_by_ids(self, ids: list[int]) -> list[PhotoRecord]:
@@ -236,9 +243,10 @@ class Database:
         if not ids:
             return []
         placeholders = ",".join("?" * len(ids))
-        rows = self._conn.execute(
-            f"SELECT * FROM photos WHERE id IN ({placeholders})", ids
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM photos WHERE id IN ({placeholders})", ids
+            ).fetchall()
         return [_row_to_photo(r) for r in rows]
 
     # ── groups ─────────────────────────────────────────────────────────────
@@ -273,12 +281,17 @@ class Database:
 
     def get_group(self, group_id: int) -> Optional[DuplicateGroup]:
         assert self._conn
-        row = self._conn.execute(
-            "SELECT * FROM duplicate_groups WHERE id = ?", (group_id,)
-        ).fetchone()
-        if not row:
-            return None
-        return _row_to_group(row, self._get_member_ids(group_id))
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT * FROM duplicate_groups WHERE id = ?", (group_id,)
+            ).fetchone()
+            member_ids = (
+                [r["photo_id"] for r in self._conn.execute(
+                    "SELECT photo_id FROM group_members WHERE group_id = ?", (group_id,)
+                ).fetchall()]
+                if row else []
+            )
+        return _row_to_group(row, member_ids) if row else None
 
     def get_all_groups(
         self,
@@ -313,19 +326,25 @@ class Database:
         }
         col = order_by if order_by in safe_order else "created_at"
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-        rows = self._conn.execute(
-            f"""
-            SELECT dg.* FROM duplicate_groups dg
-            {where_sql}
-            ORDER BY dg.{col} DESC
-            LIMIT ? OFFSET ?
-            """,
-            (*params, limit, offset),
-        ).fetchall()
-        return [
-            _row_to_group(r, self._get_member_ids(r["id"]))
-            for r in rows
-        ]
+        with self._lock:
+            rows = self._conn.execute(
+                f"""
+                SELECT dg.* FROM duplicate_groups dg
+                {where_sql}
+                ORDER BY dg.{col} DESC
+                LIMIT ? OFFSET ?
+                """,
+                (*params, limit, offset),
+            ).fetchall()
+            result = [
+                _row_to_group(r, [
+                    m["photo_id"] for m in self._conn.execute(
+                        "SELECT photo_id FROM group_members WHERE group_id = ?", (r["id"],)
+                    ).fetchall()
+                ])
+                for r in rows
+            ]
+        return result
 
     def count_groups(
         self,
@@ -342,9 +361,10 @@ class Database:
             where.append("review_status = ?")
             params.append(status)
         where_sql = f"WHERE {' AND '.join(where)}" if where else ""
-        row = self._conn.execute(
-            f"SELECT COUNT(*) AS n FROM duplicate_groups {where_sql}", params
-        ).fetchone()
+        with self._lock:
+            row = self._conn.execute(
+                f"SELECT COUNT(*) AS n FROM duplicate_groups {where_sql}", params
+            ).fetchone()
         return row["n"]
 
     def update_group_status(self, group_id: int, status: ReviewStatus) -> None:
@@ -362,6 +382,7 @@ class Database:
             )
 
     def _get_member_ids(self, group_id: int) -> list[int]:
+        # Callers must already hold self._lock when calling this.
         assert self._conn
         rows = self._conn.execute(
             "SELECT photo_id FROM group_members WHERE group_id = ?", (group_id,)
@@ -396,10 +417,11 @@ class Database:
         if undone is not None:
             where = "WHERE undone = ?"
             params.append(1 if undone else 0)
-        rows = self._conn.execute(
-            f"SELECT * FROM move_history {where} ORDER BY id DESC LIMIT ?",
-            (*params, limit),
-        ).fetchall()
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM move_history {where} ORDER BY id DESC LIMIT ?",
+                (*params, limit),
+            ).fetchall()
         return [_row_to_move(r) for r in rows]
 
     def mark_move_undone(self, move_id: int) -> None:
@@ -410,28 +432,22 @@ class Database:
 
     def get_stats(self) -> dict:
         assert self._conn
-        r = self._conn
-        total = r.execute("SELECT COUNT(*) AS n, SUM(size_bytes) AS b FROM photos").fetchone()
-        by_reason = r.execute(
-            "SELECT reason, COUNT(*) AS n FROM duplicate_groups GROUP BY reason"
-        ).fetchall()
-        by_status = r.execute(
-            "SELECT review_status, COUNT(*) AS n FROM duplicate_groups GROUP BY review_status"
-        ).fetchall()
-        flagged = r.execute(
-            """
-            SELECT SUM(p.size_bytes) AS b FROM photos p
-            JOIN group_members gm ON gm.photo_id = p.id
-            JOIN duplicate_groups dg ON dg.id = gm.group_id
-            WHERE p.id != dg.keeper_id OR dg.keeper_id IS NULL
-            """
-        ).fetchone()
-        approved_size = r.execute(
-            """
-            SELECT SUM(p.size_bytes) AS b FROM photos p
-            WHERE p.review_status IN ('approved_delete', 'moved')
-            """
-        ).fetchone()
+        with self._lock:
+            c = self._conn
+            total        = c.execute("SELECT COUNT(*) AS n, SUM(size_bytes) AS b FROM photos").fetchone()
+            by_reason    = c.execute("SELECT reason, COUNT(*) AS n FROM duplicate_groups GROUP BY reason").fetchall()
+            by_status    = c.execute("SELECT review_status, COUNT(*) AS n FROM duplicate_groups GROUP BY review_status").fetchall()
+            flagged      = c.execute(
+                """
+                SELECT SUM(p.size_bytes) AS b FROM photos p
+                JOIN group_members gm ON gm.photo_id = p.id
+                JOIN duplicate_groups dg ON dg.id = gm.group_id
+                WHERE p.id != dg.keeper_id OR dg.keeper_id IS NULL
+                """
+            ).fetchone()
+            approved_size = c.execute(
+                "SELECT SUM(p.size_bytes) AS b FROM photos p WHERE p.review_status IN ('approved_delete', 'moved')"
+            ).fetchone()
         return {
             "total_photos": total["n"] or 0,
             "total_size_bytes": total["b"] or 0,
@@ -458,11 +474,16 @@ class Database:
         if min_confidence > 0:
             where.append("confidence >= ?")
             params.append(min_confidence)
-        rows = self._conn.execute(
-            f"SELECT * FROM duplicate_groups WHERE {' AND '.join(where)} ORDER BY confidence DESC",
-            params,
-        ).fetchall()
-        return [_row_to_group(r, self._get_member_ids(r["id"])) for r in rows]
+        with self._lock:
+            rows = self._conn.execute(
+                f"SELECT * FROM duplicate_groups WHERE {' AND '.join(where)} ORDER BY confidence DESC",
+                params,
+            ).fetchall()
+            result = [
+                _row_to_group(r, self._get_member_ids(r["id"]))
+                for r in rows
+            ]
+        return result
 
 
 # ── row converters ──────────────────────────────────────────────────────────
